@@ -85,6 +85,19 @@
             <span class="ops-separator">|</span>
             <span class="ops-label">VERSION:</span>
             <span class="ops-version" id="opsVersion">{{ version }}</span>
+            <span class="ops-separator">|</span>
+            <div class="ops-subscription" id="opsSubscription" onclick="openSettingsModal(); showSettingsTab('subscription');">
+                <span class="ops-label">LICENSE:</span>
+                <span class="ops-subscription-status" id="opsSubscriptionStatus">--</span>
+            </div>
+        </div>
+
+        <!-- Subscription Alert Banner (shown when subscription/token expiring) -->
+        <div class="subscription-alert-banner hidden" id="subscriptionAlertBanner">
+            <span class="alert-icon">&#9888;</span>
+            <span class="alert-message" id="alertBannerMessage">Your subscription is expiring soon</span>
+            <button class="alert-action" onclick="openSettingsModal(); showSettingsTab('subscription');">VIEW DETAILS</button>
+            <button class="alert-dismiss" onclick="dismissAlertBanner()">&#10005;</button>
         </div>
 
         <!-- Main Content -->
@@ -336,6 +349,7 @@
                     <button class="settings-tab active" onclick="showSettingsTab('general')">General</button>
                     <button class="settings-tab" onclick="showSettingsTab('network')">Network</button>
                     <button class="settings-tab" onclick="showSettingsTab('display')">Display</button>
+                    <button class="settings-tab" onclick="showSettingsTab('subscription')">Subscription</button>
                     <button class="settings-tab" onclick="showSettingsTab('about')">About</button>
                 </div>
 
@@ -379,6 +393,79 @@
                                 <span class="toggle-slider"></span>
                                 <span class="toggle-label">Enable Animations</span>
                             </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="settingsSubscription" class="settings-content">
+                    <div class="settings-group">
+                        <h3>Subscription Status</h3>
+                        <div class="subscription-status-card" id="subscriptionStatusCard">
+                            <div class="subscription-status-header">
+                                <span class="subscription-status-badge" id="subscriptionBadge">ACTIVE</span>
+                                <span class="subscription-tier" id="subscriptionTier">Standard</span>
+                            </div>
+                            <div class="subscription-details">
+                                <div class="setting-row">
+                                    <label>License Key:</label>
+                                    <span class="info-value" id="subLicenseKey">Not configured</span>
+                                </div>
+                                <div class="setting-row">
+                                    <label>Start Date:</label>
+                                    <span class="info-value" id="subStartDate">--</span>
+                                </div>
+                                <div class="setting-row">
+                                    <label>Expiry Date:</label>
+                                    <span class="info-value" id="subExpiryDate">--</span>
+                                </div>
+                                <div class="setting-row">
+                                    <label>Days Remaining:</label>
+                                    <span class="info-value days-remaining" id="subDaysRemaining">--</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <h3>Netbird Token</h3>
+                        <div class="token-status-card" id="tokenStatusCard">
+                            <div class="setting-row">
+                                <label>Token Expiry:</label>
+                                <span class="info-value" id="tokenExpiryDate">--</span>
+                            </div>
+                            <div class="setting-row">
+                                <label>Days Remaining:</label>
+                                <span class="info-value days-remaining" id="tokenDaysRemaining">--</span>
+                            </div>
+                            <div class="setting-row">
+                                <label>Last Updated:</label>
+                                <span class="info-value" id="tokenLastUpdated">--</span>
+                            </div>
+                        </div>
+
+                        <h3>Configure Expiry Dates</h3>
+                        <div class="subscription-config">
+                            <div class="setting-row">
+                                <label>Subscription Expiry:</label>
+                                <input type="date" id="configSubExpiry" class="input">
+                            </div>
+                            <div class="setting-row">
+                                <label>Token Expiry:</label>
+                                <input type="date" id="configTokenExpiry" class="input">
+                            </div>
+                            <div class="setting-row">
+                                <label>License Key:</label>
+                                <input type="text" id="configLicenseKey" class="input" placeholder="XXXX-XXXX-XXXX">
+                            </div>
+                            <div class="btn-group mt-10">
+                                <button class="btn btn-primary" onclick="saveSubscriptionConfig()">SAVE CONFIGURATION</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Alerts Section -->
+                    <div class="settings-group" id="subscriptionAlertsSection">
+                        <h3>Active Alerts</h3>
+                        <div class="subscription-alerts-list" id="subscriptionAlertsList">
+                            <div class="no-alerts">No active alerts</div>
                         </div>
                     </div>
                 </div>

@@ -15,8 +15,9 @@ import requests
 import psutil
 import socket
 import ipaddress
-from datetime import timedelta
+from datetime import timedelta, datetime
 from functools import wraps
+from pathlib import Path
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from flask_socketio import SocketIO, emit
 
@@ -35,6 +36,171 @@ WARHAMMER_DOMAIN = os.environ.get('NETBIRD_DOMAIN', 'demo.crabsthatgrab.com')
 WARHAMMER_TOKEN = os.environ.get('NETBIRD_TOKEN', '')
 MAPBOX_TOKEN = os.environ.get('MAPBOX_TOKEN', '')
 BASE_NETPLAN = os.environ.get('BASE_NETPLAN', '/etc/netplan/01-network-manager-all.yaml')
+
+# Subscription/Token configuration
+SUBSCRIPTION_DATA_FILE = os.environ.get('SUBSCRIPTION_DATA_FILE', '/etc/warhammer/subscription.json')
+SUBSCRIPTION_ALERT_THRESHOLDS = [30, 15, 7, 3, 1]  # Days before expiry to show alerts
+
+# ==================== SUBSCRIPTION MANAGEMENT ====================
+
+def get_default_subscription_data():
+    """Return default subscription data structure"""
+    return {
+        'subscription': {
+            'active': True,
+            'tier': 'standard',
+            'start_date': None,
+            'expiry_date': None,
+            'license_key': None
+        },
+        'netbird_token': {
+            'expiry_date': None,
+            'last_updated': None
+        },
+        'alerts_dismissed': []
+    }
+
+def load_subscription_data():
+    """Load subscription/token data from file"""
+    try:
+        if Path(SUBSCRIPTION_DATA_FILE).exists():
+            with open(SUBSCRIPTION_DATA_FILE, 'r') as f:
+                data = json.load(f)
+                # Merge with defaults to ensure all keys exist
+                default = get_default_subscription_data()
+                for key in default:
+                    if key not in data:
+                        data[key] = default[key]
+                return data
+    except Exception as e:
+        print(f"Error loading subscription data: {e}")
+    return get_default_subscription_data()
+
+def save_subscription_data(data):
+    """Save subscription/token data to file"""
+    try:
+        Path(SUBSCRIPTION_DATA_FILE).parent.mkdir(parents=True, exist_ok=True)
+        with open(SUBSCRIPTION_DATA_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving subscription data: {e}")
+        return False
+
+def calculate_days_remaining(expiry_date_str):
+    """Calculate days remaining until expiry"""
+    if not expiry_date_str:
+        return None
+    try:
+        expiry = datetime.strptime(expiry_date_str, '%Y-%m-%d')
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        delta = expiry - today
+        return delta.days
+    except:
+        return None
+
+def get_subscription_status():
+    """Get current subscription and token status"""
+    data = load_subscription_data()
+
+    sub = data.get('subscription', {})
+    token = data.get('netbird_token', {})
+
+    sub_days = calculate_days_remaining(sub.get('expiry_date'))
+    token_days = calculate_days_remaining(token.get('expiry_date'))
+
+    # Determine overall status
+    is_expired = False
+    if sub_days is not None and sub_days < 0:
+        is_expired = True
+    if token_days is not None and token_days < 0:
+        is_expired = True
+
+    return {
+        'subscription': {
+            'active': sub.get('active', True) and not is_expired,
+            'tier': sub.get('tier', 'standard'),
+            'start_date': sub.get('start_date'),
+            'expiry_date': sub.get('expiry_date'),
+            'days_remaining': sub_days,
+            'license_key': sub.get('license_key')
+        },
+        'netbird_token': {
+            'expiry_date': token.get('expiry_date'),
+            'days_remaining': token_days,
+            'last_updated': token.get('last_updated')
+        },
+        'is_expired': is_expired,
+        'alerts': get_subscription_alerts(sub_days, token_days, data.get('alerts_dismissed', []))
+    }
+
+def get_subscription_alerts(sub_days, token_days, dismissed):
+    """Generate alerts for upcoming expirations"""
+    alerts = []
+
+    for threshold in SUBSCRIPTION_ALERT_THRESHOLDS:
+        # Subscription alerts
+        if sub_days is not None and sub_days <= threshold and sub_days >= 0:
+            alert_id = f"sub_{threshold}"
+            if alert_id not in dismissed:
+                urgency = 'critical' if threshold <= 3 else 'warning' if threshold <= 7 else 'info'
+                alerts.append({
+                    'id': alert_id,
+                    'type': 'subscription',
+                    'message': f"Subscription expires in {sub_days} day{'s' if sub_days != 1 else ''}",
+                    'days': sub_days,
+                    'urgency': urgency
+                })
+                break  # Only show one subscription alert
+
+        # Token alerts
+        if token_days is not None and token_days <= threshold and token_days >= 0:
+            alert_id = f"token_{threshold}"
+            if alert_id not in dismissed:
+                urgency = 'critical' if threshold <= 3 else 'warning' if threshold <= 7 else 'info'
+                alerts.append({
+                    'id': alert_id,
+                    'type': 'token',
+                    'message': f"Netbird token expires in {token_days} day{'s' if token_days != 1 else ''}",
+                    'days': token_days,
+                    'urgency': urgency
+                })
+                break  # Only show one token alert
+
+    # Expired alerts
+    if sub_days is not None and sub_days < 0:
+        alerts.insert(0, {
+            'id': 'sub_expired',
+            'type': 'subscription',
+            'message': f"Subscription expired {abs(sub_days)} day{'s' if abs(sub_days) != 1 else ''} ago",
+            'days': sub_days,
+            'urgency': 'expired'
+        })
+
+    if token_days is not None and token_days < 0:
+        alerts.insert(0, {
+            'id': 'token_expired',
+            'type': 'token',
+            'message': f"Netbird token expired {abs(token_days)} day{'s' if abs(token_days) != 1 else ''} ago",
+            'days': token_days,
+            'urgency': 'expired'
+        })
+
+    return alerts
+
+def subscription_required(f):
+    """Decorator to check if subscription is active"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        status = get_subscription_status()
+        if status['is_expired']:
+            return jsonify({
+                'error': 'Subscription expired',
+                'message': 'Your WARHAMMER subscription has expired. Please renew to continue using network features.',
+                'subscription_status': status
+            }), 402  # Payment Required
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Interfaces to hide from the UI
 HIDDEN_INTERFACES = ['lo', 'virbr0', 'virbr0-nic', 'docker0']
@@ -429,8 +595,114 @@ def get_version():
         'description': 'Network Overlay Management System'
     })
 
+# ==================== SUBSCRIPTION API ====================
+
+@app.route('/api/subscription/status')
+@login_required
+def api_subscription_status():
+    """Get current subscription and token status"""
+    return jsonify(get_subscription_status())
+
+@app.route('/api/subscription/update', methods=['POST'])
+@login_required
+def api_subscription_update():
+    """Update subscription or token expiry dates"""
+    try:
+        data = load_subscription_data()
+        updates = request.json
+
+        if 'subscription' in updates:
+            sub_update = updates['subscription']
+            if 'expiry_date' in sub_update:
+                data['subscription']['expiry_date'] = sub_update['expiry_date']
+            if 'start_date' in sub_update:
+                data['subscription']['start_date'] = sub_update['start_date']
+            if 'tier' in sub_update:
+                data['subscription']['tier'] = sub_update['tier']
+            if 'license_key' in sub_update:
+                data['subscription']['license_key'] = sub_update['license_key']
+            if 'active' in sub_update:
+                data['subscription']['active'] = sub_update['active']
+
+        if 'netbird_token' in updates:
+            token_update = updates['netbird_token']
+            if 'expiry_date' in token_update:
+                data['netbird_token']['expiry_date'] = token_update['expiry_date']
+                data['netbird_token']['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        # Clear dismissed alerts when dates change
+        if 'subscription' in updates or 'netbird_token' in updates:
+            data['alerts_dismissed'] = []
+
+        if save_subscription_data(data):
+            return jsonify({
+                'status': 'updated',
+                'subscription_status': get_subscription_status()
+            })
+        else:
+            return jsonify({'error': 'Failed to save subscription data'}), 500
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/subscription/dismiss-alert', methods=['POST'])
+@login_required
+def api_dismiss_alert():
+    """Dismiss a subscription alert"""
+    try:
+        alert_id = request.json.get('alert_id')
+        if not alert_id:
+            return jsonify({'error': 'Alert ID required'}), 400
+
+        data = load_subscription_data()
+        if alert_id not in data['alerts_dismissed']:
+            data['alerts_dismissed'].append(alert_id)
+            save_subscription_data(data)
+
+        return jsonify({'status': 'dismissed'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/subscription/configure', methods=['POST'])
+@login_required
+def api_subscription_configure():
+    """Initial subscription configuration (for first-time setup)"""
+    try:
+        config = request.json
+        data = load_subscription_data()
+
+        # Set subscription details
+        if 'subscription_expiry' in config:
+            data['subscription']['expiry_date'] = config['subscription_expiry']
+            data['subscription']['start_date'] = config.get('subscription_start', datetime.now().strftime('%Y-%m-%d'))
+            data['subscription']['active'] = True
+
+        if 'token_expiry' in config:
+            data['netbird_token']['expiry_date'] = config['token_expiry']
+            data['netbird_token']['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        if 'license_key' in config:
+            data['subscription']['license_key'] = config['license_key']
+
+        if 'tier' in config:
+            data['subscription']['tier'] = config['tier']
+
+        data['alerts_dismissed'] = []
+
+        if save_subscription_data(data):
+            return jsonify({
+                'status': 'configured',
+                'subscription_status': get_subscription_status()
+            })
+        else:
+            return jsonify({'error': 'Failed to save configuration'}), 500
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/warhammer/peers')
 @login_required
+@subscription_required
 def get_warhammer_peers():
     """Get WARHAMMER network peers from management API"""
     try:
@@ -462,6 +734,7 @@ def get_warhammer_peers():
 
 @app.route('/api/warhammer/routes')
 @login_required
+@subscription_required
 def get_warhammer_routes():
     """Get WARHAMMER network routes from management API"""
     try:
@@ -487,6 +760,7 @@ def get_warhammer_routes():
 
 @app.route('/api/warhammer/routes', methods=['POST'])
 @login_required
+@subscription_required
 def create_warhammer_route():
     """Create a new WARHAMMER network route"""
     try:
@@ -511,6 +785,7 @@ def create_warhammer_route():
 
 @app.route('/api/warhammer/routes/<route_id>', methods=['PUT'])
 @login_required
+@subscription_required
 def update_warhammer_route(route_id):
     """Update a WARHAMMER network route (enable/disable)"""
     try:
@@ -547,6 +822,7 @@ def update_warhammer_route(route_id):
 
 @app.route('/api/warhammer/routes/<route_id>', methods=['DELETE'])
 @login_required
+@subscription_required
 def delete_warhammer_route(route_id):
     """Delete a WARHAMMER network route"""
     try:
@@ -580,6 +856,7 @@ def delete_warhammer_route(route_id):
 
 @app.route('/api/warhammer/groups')
 @login_required
+@subscription_required
 def get_warhammer_groups():
     """Get WARHAMMER network groups from management API"""
     try:
