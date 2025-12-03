@@ -417,7 +417,18 @@
 
                     <div class="settings-group">
                         <h3>Cellular / APN Settings</h3>
-                        <div id="apnConnectionsList">
+
+                        <!-- Auto-Configure Section -->
+                        <div class="apn-auto-config" id="apnAutoConfig">
+                            <div class="auto-config-info" id="autoConfigInfo">
+                                <span class="detecting">Detecting carrier...</span>
+                            </div>
+                            <button class="btn btn-primary" id="autoConfigBtn" onclick="autoConfigureApn()" style="margin-top: 10px;">
+                                &#9889; AUTO-CONFIGURE
+                            </button>
+                        </div>
+
+                        <div id="apnConnectionsList" style="margin-top: 15px;">
                             <!-- Existing connections populated by JS -->
                             <div style="color: var(--text-muted); font-size: 12px; padding: 10px 0;">
                                 Loading cellular connections...
@@ -425,7 +436,7 @@
                         </div>
 
                         <div class="apn-form" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-color);">
-                            <h4 style="margin-bottom: 10px; color: var(--text-secondary);">Add/Update APN</h4>
+                            <h4 style="margin-bottom: 10px; color: var(--text-secondary);">Manual APN Configuration</h4>
                             <div class="setting-row">
                                 <label>Connection Name:</label>
                                 <input type="text" id="apnConnectionName" class="input" value="WARHAMMER-Mobile" placeholder="Connection name">
@@ -450,8 +461,8 @@
                                 </label>
                             </div>
                             <div class="btn-group mt-10">
-                                <button class="btn btn-primary" onclick="saveApnSettings()">
-                                    SAVE APN
+                                <button class="btn btn-secondary" onclick="saveApnSettings()">
+                                    SAVE MANUAL APN
                                 </button>
                             </div>
                             <div id="apnStatus" style="margin-top: 10px; font-size: 12px;"></div>
