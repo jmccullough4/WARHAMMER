@@ -666,7 +666,7 @@ def fetch_peer_gps(peer_ip, port=8080):
     try:
         response = requests.get(
             f'http://{peer_ip}:{port}/api/peer/gps',
-            timeout=2
+            timeout=3
         )
         if response.status_code == 200:
             data = response.json()
@@ -680,9 +680,20 @@ def fetch_peer_gps(peer_ip, port=8080):
                     'hostname': data.get('hostname'),
                     'timestamp': time.time()
                 }
+                print(f"[PEER GPS] Got GPS from {peer_ip}: {data.get('hostname')} @ {data['latitude']:.4f}, {data['longitude']:.4f}")
                 return peer_gps_cache[peer_ip]
-    except:
+        elif response.status_code == 404:
+            # Peer has no GPS fix - this is normal
+            pass
+        else:
+            print(f"[PEER GPS] {peer_ip} returned status {response.status_code}")
+    except requests.exceptions.ConnectError:
+        # Peer not running WARHAMMER on this port - silent fail
         pass
+    except requests.exceptions.Timeout:
+        print(f"[PEER GPS] Timeout connecting to {peer_ip}:{port}")
+    except Exception as e:
+        print(f"[PEER GPS] Error fetching from {peer_ip}: {e}")
     return None
 
 def fetch_all_peer_gps(peers, port=8080):
@@ -691,9 +702,15 @@ def fetch_all_peer_gps(peers, port=8080):
 
     connected_peers = [p for p in peers if p.get('connected') and p.get('ip')]
 
+    if connected_peers:
+        print(f"[PEER GPS] Fetching GPS from {len(connected_peers)} connected peers...")
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(fetch_peer_gps, p['ip'], port): p['ip'] for p in connected_peers}
         concurrent.futures.wait(futures, timeout=5)
+
+    if peer_gps_cache:
+        print(f"[PEER GPS] Cache now has {len(peer_gps_cache)} peer locations")
 
 @app.route('/api/version')
 @login_required
