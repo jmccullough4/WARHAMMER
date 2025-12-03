@@ -1282,29 +1282,64 @@ def fetch_peer_gps(peer_ip, port=8080):
     return None
 
 def fetch_all_peer_gps(peers, port=8080):
-    """Fetch GPS from all connected peers in parallel"""
+    """Fetch GPS and version from all connected peers in parallel"""
     import concurrent.futures
 
     connected_peers = [p for p in peers if p.get('connected') and p.get('ip')]
 
     if connected_peers:
-        print(f"[PEER GPS] Fetching GPS from {len(connected_peers)} connected peers...")
+        print(f"[PEER DATA] Fetching GPS and version from {len(connected_peers)} connected peers...")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(fetch_peer_gps, p['ip'], port): p['ip'] for p in connected_peers}
-        concurrent.futures.wait(futures, timeout=5)
+        # Fetch GPS data
+        gps_futures = {executor.submit(fetch_peer_gps, p['ip'], port): p['ip'] for p in connected_peers}
+        # Fetch version data
+        version_futures = {executor.submit(fetch_peer_version, p['ip'], port): p['ip'] for p in connected_peers}
+        concurrent.futures.wait(list(gps_futures.keys()) + list(version_futures.keys()), timeout=5)
 
     if peer_gps_cache:
-        print(f"[PEER GPS] Cache now has {len(peer_gps_cache)} peer locations")
+        print(f"[PEER DATA] GPS cache has {len(peer_gps_cache)} peer locations")
+    if peer_version_cache:
+        print(f"[PEER DATA] Version cache has {len(peer_version_cache)} peer versions")
+
+# Peer version cache
+peer_version_cache = {}
+PEER_VERSION_TIMEOUT = 300  # 5 minutes
+
+def fetch_peer_version(peer_ip, port=8080):
+    """Fetch version info from a peer"""
+    try:
+        response = requests.get(
+            f'http://{peer_ip}:{port}/api/version/public',
+            timeout=3
+        )
+        if response.status_code == 200:
+            data = response.json()
+            peer_version_cache[peer_ip] = {
+                'version': data.get('version'),
+                'timestamp': time.time()
+            }
+            return data
+    except Exception as e:
+        print(f"[PEER VERSION] Error fetching from {peer_ip}: {e}")
+    return None
 
 @app.route('/api/version')
 @login_required
 def get_version():
-    """Get application version information"""
+    """Get application version information (requires login)"""
     return jsonify({
         'version': APP_VERSION,
         'name': 'WARHAMMER',
         'description': 'Network Overlay Management System'
+    })
+
+@app.route('/api/version/public')
+def get_version_public():
+    """Get application version (public, for peer-to-peer version checking)"""
+    return jsonify({
+        'version': APP_VERSION,
+        'name': 'WARHAMMER'
     })
 
 # ==================== SUBSCRIPTION API ====================
@@ -1597,7 +1632,21 @@ def get_warhammer_peers():
                             'speed': gps_data.get('speed'),
                             'hostname': gps_data.get('hostname')
                         }
-            return jsonify(peers)
+                # Add version data from peer version cache
+                if peer_ip in peer_version_cache:
+                    version_data = peer_version_cache[peer_ip]
+                    if time.time() - version_data.get('timestamp', 0) < PEER_VERSION_TIMEOUT:
+                        peer['warhammer_version'] = version_data.get('version')
+                        # Flag if peer is behind current version
+                        if version_data.get('version') and version_data.get('version') != APP_VERSION:
+                            peer['version_mismatch'] = True
+
+            # Add our own version for reference
+            result = {
+                'peers': peers,
+                'local_version': APP_VERSION
+            }
+            return jsonify(result)
         else:
             return jsonify({'error': f'API error: {response.status_code}'}), response.status_code
     except requests.exceptions.Timeout:
@@ -2303,6 +2352,132 @@ def restart_app():
             return jsonify({'status': 'restarting', 'method': 'exit'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ==================== NETWORK-WIDE UPDATES ====================
+
+@app.route('/api/system/upgrade/peers')
+@login_required
+def get_outdated_peers():
+    """Get list of peers that need updates"""
+    outdated = []
+    for peer_ip, version_data in peer_version_cache.items():
+        if version_data.get('version') and version_data.get('version') != APP_VERSION:
+            outdated.append({
+                'ip': peer_ip,
+                'version': version_data.get('version'),
+                'name': version_data.get('name', 'Unknown'),
+                'timestamp': version_data.get('timestamp', 0)
+            })
+    return jsonify({
+        'local_version': APP_VERSION,
+        'outdated_peers': outdated
+    })
+
+@app.route('/api/system/upgrade/peer/<peer_ip>', methods=['POST'])
+@login_required
+def trigger_peer_upgrade(peer_ip):
+    """Trigger upgrade on a specific peer"""
+    try:
+        # Send upgrade request to peer
+        response = requests.post(
+            f'http://{peer_ip}:5000/api/system/upgrade/remote',
+            timeout=10,
+            json={'initiator': request.host}
+        )
+        if response.status_code == 200:
+            return jsonify({'status': 'triggered', 'peer': peer_ip})
+        else:
+            return jsonify({'error': f'Peer returned {response.status_code}'}), 400
+    except requests.exceptions.Timeout:
+        return jsonify({'error': 'Peer did not respond in time'}), 408
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/system/upgrade/remote', methods=['POST'])
+@login_required
+def receive_remote_upgrade():
+    """Receive upgrade request from another peer"""
+    data = request.get_json() or {}
+    initiator = data.get('initiator', 'unknown')
+
+    # Check if we're already upgrading
+    if upgrade_status.get('running'):
+        return jsonify({'error': 'Upgrade already in progress'}), 409
+
+    # Start the upgrade in background
+    def do_remote_upgrade():
+        global upgrade_status
+        upgrade_status = {
+            'running': True,
+            'progress': 0,
+            'stage': f'Remote upgrade initiated by {initiator}',
+            'log': [f'Upgrade triggered by peer: {initiator}'],
+            'error': None,
+            'completed': False,
+            'reboot_required': False,
+            'upgrade_type': 'remote'
+        }
+
+        try:
+            # Pull latest code
+            upgrade_status['stage'] = 'Pulling latest code...'
+            upgrade_status['progress'] = 30
+            result = subprocess.run(
+                ['git', 'pull'],
+                cwd='/home/user/WARHAMMER',
+                capture_output=True, text=True, timeout=60
+            )
+            upgrade_status['log'].append(result.stdout)
+
+            if result.returncode != 0:
+                upgrade_status['error'] = result.stderr
+                upgrade_status['running'] = False
+                return
+
+            upgrade_status['progress'] = 80
+            upgrade_status['stage'] = 'Restarting service...'
+            upgrade_status['completed'] = True
+            upgrade_status['service_restarting'] = True
+            upgrade_status['running'] = False
+
+            # Restart service
+            def restart_service():
+                time.sleep(1)
+                subprocess.run(['systemctl', 'restart', 'warhammer'], capture_output=True)
+            threading.Thread(target=restart_service, daemon=True).start()
+
+        except Exception as e:
+            upgrade_status['error'] = str(e)
+            upgrade_status['running'] = False
+
+    threading.Thread(target=do_remote_upgrade, daemon=True).start()
+    return jsonify({'status': 'upgrade_started'})
+
+@app.route('/api/system/upgrade/network', methods=['POST'])
+@login_required
+def trigger_network_upgrade():
+    """Trigger upgrade on all outdated peers"""
+    results = []
+    for peer_ip, version_data in peer_version_cache.items():
+        if version_data.get('version') and version_data.get('version') != APP_VERSION:
+            try:
+                response = requests.post(
+                    f'http://{peer_ip}:5000/api/system/upgrade/remote',
+                    timeout=10,
+                    json={'initiator': request.host}
+                )
+                results.append({
+                    'ip': peer_ip,
+                    'status': 'triggered' if response.status_code == 200 else 'failed',
+                    'code': response.status_code
+                })
+            except Exception as e:
+                results.append({
+                    'ip': peer_ip,
+                    'status': 'error',
+                    'error': str(e)
+                })
+    return jsonify({'results': results})
 
 # ==================== IPERF3 SPEEDTEST ====================
 

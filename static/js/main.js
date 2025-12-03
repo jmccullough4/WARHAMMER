@@ -16,6 +16,7 @@ let logs = [];
 let allPeers = [];
 let allRoutes = [];
 let allGroups = [];
+let localVersion = null;
 
 const MAX_CHART_POINTS = 60;
 const chartData = {
@@ -57,6 +58,10 @@ function initApp(config) {
     refreshIntervals.peers = setInterval(fetchPeers, 15000);
     refreshIntervals.warhammer = setInterval(fetchWarhammerStatus, 30000);
     refreshIntervals.routes = setInterval(fetchRoutes, 60000);
+
+    // Check for outdated peers periodically (every 2 minutes)
+    setTimeout(checkAndNotifyOutdatedPeers, 10000); // Initial check after 10 seconds
+    refreshIntervals.outdatedPeers = setInterval(checkAndNotifyOutdatedPeers, 120000);
 
     // Add initial log
     addLog('INFO', 'WARHAMMER interface initialized');
@@ -312,12 +317,16 @@ async function fetchWarhammerStatus() {
 async function fetchPeers() {
     try {
         const response = await fetch('/api/warhammer/peers');
-        const peers = await response.json();
+        const data = await response.json();
 
-        if (peers.error) {
-            addLog('WARN', `Peers fetch: ${peers.error}`);
+        if (data.error) {
+            addLog('WARN', `Peers fetch: ${data.error}`);
             return;
         }
+
+        // Handle new response format with peers array and local_version
+        const peers = data.peers || data;
+        localVersion = data.local_version || localVersion;
 
         allPeers = peers;
         renderPeers(peers);
@@ -382,12 +391,20 @@ function renderPeers(peers) {
             ? `<div class="peer-coords">${formatCoordinates(loc.lat, loc.lon)}</div>`
             : '';
 
+        // Get WARHAMMER version if available
+        const peerVersion = peer.warhammer_version;
+        const versionMismatch = peer.version_mismatch;
+        const versionHtml = peerVersion
+            ? `<div class="peer-version ${versionMismatch ? 'version-outdated' : ''}">${peerVersion}${versionMismatch ? ' ⚠' : ''}</div>`
+            : '';
+
         div.innerHTML = `
             <div class="peer-status-dot"></div>
             <div class="peer-info">
                 <div class="peer-name">${cleanName}</div>
                 <div class="peer-ip">${peer.ip || '--'}</div>
                 ${coordsHtml}
+                ${versionHtml}
             </div>
             ${latencyHtml}
         `;
@@ -1184,9 +1201,15 @@ function showPeerDetails(peer) {
                 <span class="info-value">${peer.os || '--'}</span>
             </div>
             <div class="info-row">
-                <span class="info-label">Version:</span>
+                <span class="info-label">NB Version:</span>
                 <span class="info-value">${peer.version || '--'}</span>
             </div>
+            ${peer.warhammer_version ? `
+            <div class="info-row">
+                <span class="info-label">WARHAMMER:</span>
+                <span class="info-value ${peer.version_mismatch ? 'outdated' : ''}">${peer.warhammer_version}${peer.version_mismatch ? ' (outdated)' : ''}</span>
+            </div>
+            ` : ''}
             <div class="info-row">
                 <span class="info-label">Last Seen:</span>
                 <span class="info-value">${peer.lastSeen ? new Date(peer.lastSeen).toLocaleString() : '--'}</span>
@@ -1208,6 +1231,7 @@ function showPeerDetails(peer) {
         <div class="btn-group" style="margin-top: 15px;">
             <button class="btn btn-primary" onclick="pingPeer('${peer.ip}')">PING</button>
             ${hasGps ? `<button class="btn btn-secondary" onclick="centerMapOnPeer(${loc.lat}, ${loc.lon})">LOCATE</button>` : ''}
+            ${peer.version_mismatch ? `<button class="btn btn-warning" onclick="triggerPeerUpdate('${peer.ip}'); closePeerModal();">UPDATE</button>` : ''}
             <button class="btn btn-secondary" onclick="closePeerModal()">CLOSE</button>
         </div>
     `;
@@ -1859,6 +1883,25 @@ async function checkForUpdates() {
                 `;
             }
 
+            // Check for outdated peers and add section if any
+            const outdatedPeers = await checkOutdatedPeers();
+            if (outdatedPeers.length > 0) {
+                html += `
+                    <div class="update-section" style="margin-top: 15px;">
+                        <h4 style="color: var(--accent-warning); margin-bottom: 8px;">&#9888; Outdated Peers (${outdatedPeers.length})</h4>
+                        <div class="update-list">
+                            ${outdatedPeers.map(p => `
+                                <div class="update-item" style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span class="package-name">${p.ip} - v${p.version}</span>
+                                    <button class="btn btn-xs btn-warning" onclick="triggerPeerUpdate('${p.ip}')">Update</button>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <button class="btn btn-warning" style="margin-top: 10px; width: 100%;" onclick="triggerNetworkUpdate()">Update All Peers</button>
+                    </div>
+                `;
+            }
+
             // Current version info
             html += `
                 <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid var(--border-color); font-size: 11px; color: var(--text-muted);">
@@ -2097,6 +2140,119 @@ if (typeof socket !== 'undefined' && socket) {
     socket.on('upgrade_progress', (data) => {
         updateUpgradeUI(data);
     });
+}
+
+// ==================== NETWORK-WIDE UPDATES ====================
+
+async function checkOutdatedPeers() {
+    try {
+        const response = await fetch('/api/system/upgrade/peers');
+        const data = await response.json();
+
+        if (data.outdated_peers && data.outdated_peers.length > 0) {
+            return data.outdated_peers;
+        }
+        return [];
+    } catch (error) {
+        console.error('Error checking outdated peers:', error);
+        return [];
+    }
+}
+
+async function triggerPeerUpdate(peerIp) {
+    try {
+        const response = await fetch(`/api/system/upgrade/peer/${peerIp}`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+            addLog('INFO', `Update triggered on peer ${peerIp}`);
+            return { success: true };
+        } else {
+            addLog('WARN', `Failed to trigger update on ${peerIp}: ${data.error}`);
+            return { success: false, error: data.error };
+        }
+    } catch (error) {
+        addLog('ERROR', `Error triggering update on ${peerIp}: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+}
+
+async function triggerNetworkUpdate() {
+    const btn = document.getElementById('networkUpdateBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Updating peers...';
+    }
+
+    try {
+        const response = await fetch('/api/system/upgrade/network', {
+            method: 'POST'
+        });
+        const data = await response.json();
+
+        let successCount = 0;
+        let failCount = 0;
+
+        if (data.results) {
+            data.results.forEach(result => {
+                if (result.status === 'triggered') {
+                    successCount++;
+                    addLog('INFO', `Update triggered on ${result.ip}`);
+                } else {
+                    failCount++;
+                    addLog('WARN', `Failed to update ${result.ip}: ${result.error || 'Unknown error'}`);
+                }
+            });
+        }
+
+        addLog('SUCCESS', `Network update complete: ${successCount} triggered, ${failCount} failed`);
+
+        // Refresh peers list to update version status
+        setTimeout(() => {
+            fetchPeers();
+        }, 2000);
+    } catch (error) {
+        addLog('ERROR', `Network update failed: ${error.message}`);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Update All Peers';
+        }
+    }
+}
+
+function showOutdatedPeersNotification(peers) {
+    if (!peers || peers.length === 0) return;
+
+    const container = document.getElementById('outdatedPeersNotification');
+    if (!container) return;
+
+    container.innerHTML = `
+        <div class="outdated-peers-alert">
+            <span class="alert-icon">⚠</span>
+            <div class="alert-content">
+                <strong>${peers.length} peer${peers.length > 1 ? 's' : ''} running outdated version</strong>
+                <div class="peer-list-mini">
+                    ${peers.map(p => `<span class="outdated-peer">${p.ip} (${p.version})</span>`).join(', ')}
+                </div>
+            </div>
+            <button id="networkUpdateBtn" class="btn btn-sm btn-warning" onclick="triggerNetworkUpdate()">Update All Peers</button>
+        </div>
+    `;
+    container.classList.remove('hidden');
+}
+
+// Check for outdated peers periodically
+async function checkAndNotifyOutdatedPeers() {
+    const outdated = await checkOutdatedPeers();
+    if (outdated.length > 0) {
+        showOutdatedPeersNotification(outdated);
+    } else {
+        const container = document.getElementById('outdatedPeersNotification');
+        if (container) container.classList.add('hidden');
+    }
 }
 
 // ==================== RESIZABLE PANELS ====================
