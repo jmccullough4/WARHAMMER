@@ -64,7 +64,7 @@
 
             <div class="header-right">
                 <!-- Cellular Signal Indicator -->
-                <div class="cellular-indicator hidden" id="cellularIndicator" title="Cellular Signal">
+                <div class="cellular-indicator hidden" id="cellularIndicator">
                     <div class="signal-bars">
                         <div class="signal-bar" id="bar1"></div>
                         <div class="signal-bar" id="bar2"></div>
@@ -72,6 +72,42 @@
                         <div class="signal-bar" id="bar4"></div>
                     </div>
                     <span class="cellular-tech" id="cellularTech"></span>
+                    <!-- Cellular Status Popup -->
+                    <div class="cellular-popup" id="cellularPopup">
+                        <div class="cellular-popup-title">CELLULAR STATUS</div>
+                        <div class="cellular-popup-row">
+                            <span class="label">Operator:</span>
+                            <span class="value" id="cellOperator">--</span>
+                        </div>
+                        <div class="cellular-popup-row">
+                            <span class="label">Technology:</span>
+                            <span class="value" id="cellTechnology">--</span>
+                        </div>
+                        <div class="cellular-popup-row">
+                            <span class="label">Signal:</span>
+                            <span class="value" id="cellSignal">--</span>
+                        </div>
+                        <div class="cellular-popup-row">
+                            <span class="label">RSSI:</span>
+                            <span class="value" id="cellRSSI">--</span>
+                        </div>
+                        <div class="cellular-popup-row">
+                            <span class="label">Phone:</span>
+                            <span class="value" id="cellPhone">--</span>
+                        </div>
+                        <div class="cellular-popup-row">
+                            <span class="label">IMEI:</span>
+                            <span class="value" id="cellIMEI">--</span>
+                        </div>
+                        <div class="cellular-popup-row">
+                            <span class="label">ICCID:</span>
+                            <span class="value" id="cellICCID">--</span>
+                        </div>
+                        <div class="cellular-popup-row">
+                            <span class="label">State:</span>
+                            <span class="value" id="cellState">--</span>
+                        </div>
+                    </div>
                 </div>
                 <div class="operator-info">
                     <span class="info-label">OPERATOR:</span>

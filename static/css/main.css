@@ -397,14 +397,14 @@ body {
     position: absolute;
     top: 100%;
     right: 0;
-    margin-top: 5px;
+    margin-top: 8px;
     background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--accent-primary);
     border-radius: 4px;
-    padding: 12px;
-    min-width: 180px;
+    padding: 0;
+    min-width: 220px;
     z-index: 1000;
-    box-shadow: var(--shadow-glow);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 15px rgba(255, 107, 53, 0.15);
     display: none;
 }
 
@@ -412,20 +412,42 @@ body {
     display: block;
 }
 
-.cellular-popup .popup-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 4px 0;
-    font-family: var(--font-mono);
+.cellular-popup-title {
+    background: linear-gradient(180deg, rgba(255, 107, 53, 0.2) 0%, rgba(255, 107, 53, 0.1) 100%);
+    border-bottom: 1px solid var(--border-color);
+    padding: 8px 12px;
+    font-family: var(--font-primary);
     font-size: 11px;
+    font-weight: 600;
+    color: var(--accent-primary);
+    letter-spacing: 1px;
+    text-transform: uppercase;
 }
 
-.cellular-popup .popup-row .label {
+.cellular-popup-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    border-bottom: 1px solid rgba(255, 107, 53, 0.1);
+}
+
+.cellular-popup-row:last-child {
+    border-bottom: none;
+}
+
+.cellular-popup-row .label {
     color: var(--text-muted);
 }
 
-.cellular-popup .popup-row .value {
-    color: var(--accent-primary);
+.cellular-popup-row .value {
+    color: var(--text-primary);
+    text-align: right;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* ==================== OPERATIONS BAR ==================== */
