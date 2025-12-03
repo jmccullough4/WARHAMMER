@@ -903,7 +903,12 @@ def sync_token_expiry():
             token_name = token.get('name', 'unnamed')
             if expiry:
                 try:
-                    expiry_date = datetime.fromisoformat(expiry.replace('Z', '+00:00'))
+                    # Handle nanoseconds - Python only supports microseconds (6 digits)
+                    # Truncate .123456789Z to .123456Z
+                    import re
+                    expiry_normalized = re.sub(r'\.(\d{6})\d+', r'.\1', expiry)
+                    expiry_normalized = expiry_normalized.replace('Z', '+00:00')
+                    expiry_date = datetime.fromisoformat(expiry_normalized)
                     print(f"[TOKEN SYNC] Token '{token_name}' expires: {expiry_date.strftime('%Y-%m-%d')}")
                     if earliest_expiry is None or expiry_date < earliest_expiry:
                         earliest_expiry = expiry_date
