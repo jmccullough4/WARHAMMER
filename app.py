@@ -810,7 +810,7 @@ def auto_configure_cellular():
 
         if check_conn.returncode == 0:
             # Update existing
-            cmd = ['sudo', 'nmcli', 'connection', 'modify', connection_name,
+            cmd = ['nmcli', 'connection', 'modify', connection_name,
                    'gsm.apn', apn_info['apn'],
                    'connection.autoconnect', 'yes']
             if apn_info.get('username'):
@@ -822,7 +822,7 @@ def auto_configure_cellular():
             action = 'updated'
         else:
             # Create new
-            cmd = ['sudo', 'nmcli', 'connection', 'add',
+            cmd = ['nmcli', 'connection', 'add',
                    'type', 'gsm',
                    'ifname', '*',
                    'con-name', connection_name,
@@ -841,7 +841,7 @@ def auto_configure_cellular():
 
         # Activate the connection
         activate = subprocess.run(
-            ['sudo', 'nmcli', 'connection', 'up', connection_name],
+            ['nmcli', 'connection', 'up', connection_name],
             capture_output=True,
             text=True,
             timeout=30
@@ -958,7 +958,7 @@ def set_cellular_apn():
 
         if check_conn.returncode == 0:
             # Update existing connection
-            cmd = ['sudo', 'nmcli', 'connection', 'modify', connection_name,
+            cmd = ['nmcli', 'connection', 'modify', connection_name,
                    'gsm.apn', apn,
                    'connection.autoconnect', 'yes' if autoconnect else 'no']
 
@@ -975,7 +975,7 @@ def set_cellular_apn():
             action = 'updated'
         else:
             # Create new connection
-            cmd = ['sudo', 'nmcli', 'connection', 'add',
+            cmd = ['nmcli', 'connection', 'add',
                    'type', 'gsm',
                    'ifname', '*',
                    'con-name', connection_name,
@@ -996,7 +996,7 @@ def set_cellular_apn():
 
         # Activate the connection
         activate = subprocess.run(
-            ['sudo', 'nmcli', 'connection', 'up', connection_name],
+            ['nmcli', 'connection', 'up', connection_name],
             capture_output=True,
             text=True,
             timeout=30
@@ -1022,7 +1022,7 @@ def delete_cellular_apn(connection_name):
     """Delete a cellular connection"""
     try:
         result = subprocess.run(
-            ['sudo', 'nmcli', 'connection', 'delete', connection_name],
+            ['nmcli', 'connection', 'delete', connection_name],
             capture_output=True,
             text=True,
             timeout=10
@@ -1047,7 +1047,7 @@ def connect_cellular():
             return jsonify({'error': 'Connection name required'}), 400
 
         result = subprocess.run(
-            ['sudo', 'nmcli', 'connection', 'up', connection_name],
+            ['nmcli', 'connection', 'up', connection_name],
             capture_output=True,
             text=True,
             timeout=30
@@ -1074,7 +1074,7 @@ def disconnect_cellular():
             return jsonify({'error': 'Connection name required'}), 400
 
         result = subprocess.run(
-            ['sudo', 'nmcli', 'connection', 'down', connection_name],
+            ['nmcli', 'connection', 'down', connection_name],
             capture_output=True,
             text=True,
             timeout=10
