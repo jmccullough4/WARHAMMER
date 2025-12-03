@@ -502,6 +502,118 @@ def get_system_info():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/system/cellular')
+@login_required
+def get_cellular_status():
+    """Get cellular/modem signal status using ModemManager"""
+    try:
+        result = {
+            'available': False,
+            'connected': False,
+            'signal_quality': 0,
+            'signal_bars': 0,
+            'access_technology': None,
+            'operator': None,
+            'registration': None
+        }
+
+        # Check if ModemManager is available and get modem list
+        try:
+            modem_list = subprocess.run(
+                ['mmcli', '-L'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            if modem_list.returncode != 0 or 'No modems' in modem_list.stdout:
+                return jsonify(result)
+
+            # Extract modem number from output (e.g., "/org/freedesktop/ModemManager1/Modem/0")
+            import re
+            modem_match = re.search(r'/Modem/(\d+)', modem_list.stdout)
+            if not modem_match:
+                return jsonify(result)
+
+            modem_num = modem_match.group(1)
+            result['available'] = True
+
+            # Get modem status
+            modem_info = subprocess.run(
+                ['mmcli', '-m', modem_num],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            if modem_info.returncode == 0:
+                output = modem_info.stdout
+
+                # Parse signal quality
+                signal_match = re.search(r'signal quality:\s*(\d+)', output, re.IGNORECASE)
+                if signal_match:
+                    signal = int(signal_match.group(1))
+                    result['signal_quality'] = signal
+                    # Convert to bars (0-4)
+                    if signal >= 80:
+                        result['signal_bars'] = 4
+                    elif signal >= 60:
+                        result['signal_bars'] = 3
+                    elif signal >= 40:
+                        result['signal_bars'] = 2
+                    elif signal >= 20:
+                        result['signal_bars'] = 1
+                    else:
+                        result['signal_bars'] = 0
+
+                # Parse state/connection
+                state_match = re.search(r'state:\s*(\w+)', output, re.IGNORECASE)
+                if state_match:
+                    state = state_match.group(1).lower()
+                    result['connected'] = state in ['connected', 'registered']
+                    result['registration'] = state
+
+                # Parse access technology (LTE, 5G, 3G, etc.)
+                tech_match = re.search(r'access tech:\s*(\w+)', output, re.IGNORECASE)
+                if tech_match:
+                    result['access_technology'] = tech_match.group(1).upper()
+
+                # Parse operator name
+                operator_match = re.search(r'operator name:\s*(.+)', output, re.IGNORECASE)
+                if operator_match:
+                    result['operator'] = operator_match.group(1).strip()
+
+            # Try to get more detailed signal info
+            try:
+                signal_info = subprocess.run(
+                    ['mmcli', '-m', modem_num, '--signal-get'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if signal_info.returncode == 0:
+                    output = signal_info.stdout
+                    # Parse RSSI, RSRP, etc. if available
+                    rssi_match = re.search(r'rssi:\s*([-\d.]+)', output, re.IGNORECASE)
+                    if rssi_match:
+                        result['rssi'] = float(rssi_match.group(1))
+
+                    rsrp_match = re.search(r'rsrp:\s*([-\d.]+)', output, re.IGNORECASE)
+                    if rsrp_match:
+                        result['rsrp'] = float(rsrp_match.group(1))
+            except:
+                pass
+
+        except FileNotFoundError:
+            # mmcli not installed
+            pass
+        except subprocess.TimeoutExpired:
+            pass
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e), 'available': False}), 500
+
 @app.route('/api/network/interfaces')
 @login_required
 def get_network_interfaces():
@@ -1351,6 +1463,18 @@ def remove_interface_ip(iface):
         # Don't allow removing management IPs
         if ip_to_remove in [MANAGEMENT_INTERFACE_1, MANAGEMENT_INTERFACE_2, MANAGEMENT_INTERFACE_3]:
             return jsonify({'error': 'Cannot remove management IP'}), 403
+
+        # Protect guarded IPs on br0 - these should never be changed via UI
+        # Guarded IPs: 10.x.100.1/24 pattern and 18.18.18.18
+        if iface == BRIDGE_INTERFACE:
+            # Check for 18.18.18.18
+            if ip_to_remove == '18.18.18.18' or ip_to_remove.startswith('18.18.18.18/'):
+                return jsonify({'error': 'Cannot remove guarded IP address (18.18.18.18)'}), 403
+
+            # Check for 10.x.100.1 pattern (e.g., 10.109.100.1, 10.0.100.1, etc.)
+            import re
+            if re.match(r'^10\.\d+\.100\.1(/\d+)?$', ip_to_remove):
+                return jsonify({'error': 'Cannot remove guarded IP address (10.x.100.1)'}), 403
 
         cmd = f'sudo ip addr del {ip_to_remove}/24 dev {iface}'
         result = subprocess.run(cmd.split(), capture_output=True, text=True)

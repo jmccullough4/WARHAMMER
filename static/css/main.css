@@ -1,5 +1,6 @@
 /* WARHAMMER - Military/Tactical Themed UI Stylesheet */
 
+/* Dark Mode (Default) */
 :root {
     --bg-primary: #0a0808;
     --bg-secondary: #120e0c;
@@ -29,6 +30,45 @@
 
     --rx-color: #30d158;
     --tx-color: #ff6b35;
+}
+
+/* Light Mode */
+body.light-mode {
+    --bg-primary: #f5f2ef;
+    --bg-secondary: #e8e4e0;
+    --bg-tertiary: #ddd8d3;
+    --bg-panel: rgba(232, 228, 224, 0.98);
+
+    --text-primary: #1a1412;
+    --text-secondary: #4a4038;
+    --text-muted: #8a7868;
+
+    --border-color: rgba(180, 120, 80, 0.3);
+    --border-highlight: rgba(180, 120, 80, 0.5);
+
+    --shadow-glow: 0 2px 12px rgba(0, 0, 0, 0.1);
+    --shadow-glow-strong: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+/* Light mode specific overrides */
+body.light-mode .gauge-bg {
+    stroke: #ccc5be;
+}
+
+body.light-mode .log-container {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+body.light-mode .mapboxgl-popup-content {
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+}
+
+body.light-mode .app-container {
+    background:
+        linear-gradient(rgba(180, 120, 80, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(180, 120, 80, 0.03) 1px, transparent 1px),
+        var(--bg-primary);
 }
 
 * {
@@ -281,6 +321,109 @@ body {
     border-color: var(--accent-danger);
     color: var(--accent-danger);
     box-shadow: 0 0 15px rgba(255, 59, 48, 0.2);
+}
+
+/* ==================== CELLULAR SIGNAL INDICATOR ==================== */
+
+.cellular-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.cellular-indicator:hover {
+    border-color: var(--accent-primary);
+    background: rgba(255, 107, 53, 0.1);
+}
+
+.cellular-indicator.connected {
+    border-color: var(--accent-success);
+}
+
+.cellular-indicator.disconnected {
+    border-color: var(--accent-danger);
+}
+
+.signal-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 16px;
+}
+
+.signal-bar {
+    width: 4px;
+    background: var(--text-muted);
+    border-radius: 1px;
+    transition: all 0.3s ease;
+}
+
+.signal-bar:nth-child(1) { height: 4px; }
+.signal-bar:nth-child(2) { height: 7px; }
+.signal-bar:nth-child(3) { height: 11px; }
+.signal-bar:nth-child(4) { height: 16px; }
+
+.signal-bar.active {
+    background: var(--accent-success);
+    box-shadow: 0 0 4px var(--accent-success);
+}
+
+.signal-bar.weak {
+    background: var(--accent-warning);
+    box-shadow: 0 0 4px var(--accent-warning);
+}
+
+.signal-bar.no-signal {
+    background: var(--accent-danger);
+}
+
+.cellular-tech {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--accent-info);
+    letter-spacing: 0.5px;
+}
+
+/* Cellular tooltip popup */
+.cellular-popup {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 5px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 12px;
+    min-width: 180px;
+    z-index: 1000;
+    box-shadow: var(--shadow-glow);
+    display: none;
+}
+
+.cellular-indicator:hover .cellular-popup {
+    display: block;
+}
+
+.cellular-popup .popup-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.cellular-popup .popup-row .label {
+    color: var(--text-muted);
+}
+
+.cellular-popup .popup-row .value {
+    color: var(--accent-primary);
 }
 
 /* ==================== OPERATIONS BAR ==================== */
@@ -1685,6 +1828,26 @@ body {
     background: rgba(255, 59, 48, 0.15);
 }
 
+.ip-item.guarded {
+    border-color: var(--accent-warning);
+    background: rgba(255, 176, 0, 0.05);
+}
+
+.guarded-badge {
+    font-size: 9px;
+    color: var(--accent-warning);
+    margin-left: 8px;
+}
+
+.guarded-note {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--accent-warning);
+    padding: 2px 8px;
+    border: 1px solid var(--accent-warning);
+    border-radius: 3px;
+}
+
 /* ==================== FORM ELEMENTS ==================== */
 
 .form-group {
@@ -2663,8 +2826,18 @@ body {
     color: #ff9500;
 }
 
+.ops-subscription-status.critical {
+    color: var(--accent-danger);
+    animation: blink-critical 0.8s ease-in-out infinite;
+}
+
 .ops-subscription-status.expired {
     color: var(--accent-danger);
+}
+
+@keyframes blink-critical {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
 }
 
 @keyframes pulse-warning {
@@ -2850,7 +3023,7 @@ body {
 
 .days-remaining.critical {
     color: var(--accent-danger);
-    animation: pulse-text 1s infinite;
+    animation: blink-critical 0.8s ease-in-out infinite;
 }
 
 .days-remaining.expired {

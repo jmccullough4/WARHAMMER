@@ -940,18 +940,37 @@ async function deleteRoute(routeId) {
 
 // ==================== INTERFACE CONFIG ====================
 
+function isGuardedIP(ip, ifaceName) {
+    // Check if this is a guarded IP on br0
+    if (ifaceName !== 'br0') return false;
+
+    // Check for 18.18.18.18
+    if (ip === '18.18.18.18' || ip.startsWith('18.18.18.18/')) return true;
+
+    // Check for 10.x.100.1 pattern
+    if (/^10\.\d+\.100\.1(\/\d+)?$/.test(ip)) return true;
+
+    return false;
+}
+
 function openInterfaceConfig(iface) {
     const modal = document.getElementById('interfaceModal');
     const content = document.getElementById('interfaceModalContent');
 
     const ipList = iface.addresses
         .filter(a => a.type === 'ipv4')
-        .map(a => `
-            <div class="ip-item">
-                <span>${a.address}</span>
-                <button class="btn btn-sm btn-danger" onclick="removeInterfaceIP('${iface.name}', '${a.address}')">&#10005;</button>
-            </div>
-        `).join('') || '<div class="ip-item">No IPv4 addresses</div>';
+        .map(a => {
+            const guarded = isGuardedIP(a.address, iface.name);
+            return `
+                <div class="ip-item ${guarded ? 'guarded' : ''}">
+                    <span class="ip-address">${a.address}${guarded ? ' <span class="guarded-badge">&#128274; GUARDED</span>' : ''}</span>
+                    ${guarded
+                        ? '<span class="guarded-note" title="This IP is protected and cannot be removed">Protected</span>'
+                        : `<button class="btn btn-sm btn-remove" onclick="removeInterfaceIP('${iface.name}', '${a.address}')">&#10005;</button>`
+                    }
+                </div>
+            `;
+        }).join('') || '<div class="ip-item">No IPv4 addresses</div>';
 
     content.innerHTML = `
         <div class="interface-config">
@@ -2213,25 +2232,36 @@ async function fetchSubscriptionStatus() {
 }
 
 function updateSubscriptionUI(data) {
-    // Update operations bar
+    // Update operations bar LICENSE status
     const opsStatus = document.getElementById('opsSubscriptionStatus');
     const opsContainer = document.getElementById('opsSubscription');
 
-    if (data.is_expired) {
+    // Reset classes
+    opsContainer.classList.remove('expired', 'warning');
+
+    // Use token days remaining (from management token) as the license indicator
+    const tokenDays = data.netbird_token?.days_remaining;
+    const subDays = data.subscription?.days_remaining;
+    // Use token days if available, otherwise subscription days
+    const daysRemaining = tokenDays !== null && tokenDays !== undefined ? tokenDays : subDays;
+
+    if (data.is_expired || (daysRemaining !== null && daysRemaining < 0)) {
         opsStatus.textContent = 'EXPIRED';
         opsStatus.className = 'ops-subscription-status expired';
         opsContainer.classList.add('expired');
-    } else if (data.subscription.days_remaining !== null) {
-        if (data.subscription.days_remaining <= 7) {
-            opsStatus.textContent = `${data.subscription.days_remaining}d`;
-            opsStatus.className = 'ops-subscription-status warning';
+    } else if (daysRemaining !== null) {
+        opsStatus.textContent = `${daysRemaining} DAYS`;
+        // Color coding: GREEN >30, AMBER <=30, RED <14, FLASHING RED <3
+        if (daysRemaining < 3) {
+            opsStatus.className = 'ops-subscription-status critical'; // Flashing red
             opsContainer.classList.add('warning');
-        } else if (data.subscription.days_remaining <= 30) {
-            opsStatus.textContent = `${data.subscription.days_remaining}d`;
-            opsStatus.className = 'ops-subscription-status caution';
+        } else if (daysRemaining < 14) {
+            opsStatus.className = 'ops-subscription-status warning'; // Red/orange
+            opsContainer.classList.add('warning');
+        } else if (daysRemaining <= 30) {
+            opsStatus.className = 'ops-subscription-status caution'; // Amber
         } else {
-            opsStatus.textContent = `${data.subscription.days_remaining}d`;
-            opsStatus.className = 'ops-subscription-status active';
+            opsStatus.className = 'ops-subscription-status active'; // Green
         }
     } else {
         opsStatus.textContent = 'ACTIVE';
@@ -2314,11 +2344,12 @@ function updateSubscriptionUI(data) {
 }
 
 function getDaysClass(days) {
+    // Color coding: GREEN >30, AMBER <=30, RED <14, FLASHING RED <3
     if (days < 0) return 'expired';
-    if (days <= 3) return 'critical';
-    if (days <= 7) return 'warning';
-    if (days <= 30) return 'caution';
-    return 'good';
+    if (days < 3) return 'critical';  // Flashing red
+    if (days < 14) return 'warning';  // Red
+    if (days <= 30) return 'caution'; // Amber
+    return 'good';                    // Green
 }
 
 function checkSubscriptionAlerts(data) {
@@ -2467,6 +2498,123 @@ document.addEventListener('DOMContentLoaded', () => {
     // Check subscription every 5 minutes
     setInterval(fetchSubscriptionStatus, 300000);
 });
+
+// ==================== CELLULAR SIGNAL INDICATOR ====================
+
+let cellularData = null;
+
+async function fetchCellularStatus() {
+    try {
+        const response = await fetch('/api/system/cellular');
+        if (response.ok) {
+            cellularData = await response.json();
+            updateCellularIndicator(cellularData);
+        }
+    } catch (error) {
+        console.error('Failed to fetch cellular status:', error);
+    }
+}
+
+function updateCellularIndicator(data) {
+    const indicator = document.getElementById('cellularIndicator');
+    if (!indicator) return;
+
+    // Only show if modem is available
+    if (!data.available) {
+        indicator.classList.add('hidden');
+        return;
+    }
+
+    indicator.classList.remove('hidden');
+
+    // Update connection state
+    if (data.connected) {
+        indicator.classList.add('connected');
+        indicator.classList.remove('disconnected');
+    } else {
+        indicator.classList.remove('connected');
+        indicator.classList.add('disconnected');
+    }
+
+    // Update signal bars
+    const bars = data.signal_bars || 0;
+    for (let i = 1; i <= 4; i++) {
+        const bar = document.getElementById(`bar${i}`);
+        if (bar) {
+            bar.classList.remove('active', 'weak', 'no-signal');
+            if (i <= bars) {
+                // Weak signal (1-2 bars) shows yellow, good signal (3-4) shows green
+                bar.classList.add(bars <= 2 ? 'weak' : 'active');
+            } else if (!data.connected) {
+                bar.classList.add('no-signal');
+            }
+        }
+    }
+
+    // Update tech label (LTE, 5G, etc.)
+    const techEl = document.getElementById('cellularTech');
+    if (techEl) {
+        techEl.textContent = data.access_technology || '';
+    }
+
+    // Update title/tooltip
+    let tooltip = `Cellular: ${data.connected ? 'Connected' : 'Disconnected'}`;
+    if (data.signal_quality) tooltip += `\nSignal: ${data.signal_quality}%`;
+    if (data.operator) tooltip += `\nOperator: ${data.operator}`;
+    if (data.access_technology) tooltip += `\nTech: ${data.access_technology}`;
+    indicator.title = tooltip;
+}
+
+// Initialize cellular check
+document.addEventListener('DOMContentLoaded', () => {
+    fetchCellularStatus();
+    // Refresh every 30 seconds
+    setInterval(fetchCellularStatus, 30000);
+});
+
+// ==================== DARK MODE ====================
+
+function initDarkMode() {
+    // Check localStorage for saved preference
+    const savedMode = localStorage.getItem('warhammer_dark_mode');
+    const isDarkMode = savedMode === null ? true : savedMode === 'true';
+
+    // Apply the mode
+    if (!isDarkMode) {
+        document.body.classList.add('light-mode');
+    }
+
+    // Update toggle state
+    const toggle = document.getElementById('darkMode');
+    if (toggle) {
+        toggle.checked = isDarkMode;
+    }
+}
+
+function toggleDarkMode() {
+    const toggle = document.getElementById('darkMode');
+    const isDarkMode = toggle.checked;
+
+    if (isDarkMode) {
+        document.body.classList.remove('light-mode');
+    } else {
+        document.body.classList.add('light-mode');
+    }
+
+    // Save preference
+    localStorage.setItem('warhammer_dark_mode', isDarkMode.toString());
+
+    // Reinitialize map style if map exists
+    if (map) {
+        const style = isDarkMode ? 'mapbox://styles/mapbox/dark-v11' : 'mapbox://styles/mapbox/light-v11';
+        map.setStyle(style);
+    }
+
+    addLog('INFO', `Switched to ${isDarkMode ? 'dark' : 'light'} mode`);
+}
+
+// Initialize dark mode on page load
+document.addEventListener('DOMContentLoaded', initDarkMode);
 
 // ==================== CLEANUP ====================
 
