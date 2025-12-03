@@ -251,8 +251,10 @@ async function fetchWarhammerStatus() {
         if (data.publicKey) {
             document.getElementById('whPubKey').textContent = data.publicKey.substring(0, 20) + '...';
         }
-        if (data.fqdn) {
-            document.getElementById('whFqdn').textContent = data.fqdn;
+        // Show network ID (derived from public key) instead of FQDN
+        if (data.publicKey) {
+            // Use first 8 chars of public key as network ID
+            document.getElementById('whNetworkId').textContent = data.publicKey.substring(0, 8).toUpperCase();
         }
 
     } catch (error) {
@@ -321,18 +323,27 @@ function renderPeers(peers) {
         const div = document.createElement('div');
         div.className = `peer-item ${isOnline ? 'online' : 'offline'}`;
         div.onclick = () => showPeerDetails(peer);
-        div.setAttribute('data-peer-name', (peer.name || peer.hostname || '').toLowerCase());
+        const cleanName = getCleanPeerName(peer);
+        div.setAttribute('data-peer-name', cleanName.toLowerCase());
         div.setAttribute('data-peer-ip', peer.ip || '');
 
         const latencyHtml = peer.latency
             ? `<div class="peer-latency ${getLatencyClass(peer.latency)}">${peer.latency.toFixed(1)}ms</div>`
             : '';
 
+        // Get GPS location if available
+        const loc = getPeerLocation(peer);
+        const hasGps = loc.lat && loc.lon && !isNaN(loc.lat) && !isNaN(loc.lon);
+        const coordsHtml = hasGps
+            ? `<div class="peer-coords">${formatCoordinates(loc.lat, loc.lon)}</div>`
+            : '';
+
         div.innerHTML = `
             <div class="peer-status-dot"></div>
             <div class="peer-info">
-                <div class="peer-name">${peer.name || peer.hostname || 'Unknown'}</div>
+                <div class="peer-name">${cleanName}</div>
                 <div class="peer-ip">${peer.ip || '--'}</div>
+                ${coordsHtml}
             </div>
             ${latencyHtml}
         `;
@@ -1048,12 +1059,43 @@ function refreshPeers() {
 function showPeerDetails(peer) {
     const modal = document.getElementById('peerModal');
     const content = document.getElementById('peerModalContent');
+    const cleanName = getCleanPeerName(peer);
+    const loc = getPeerLocation(peer);
+    const hasGps = loc.lat && loc.lon && !isNaN(loc.lat) && !isNaN(loc.lon);
+
+    // Build location HTML with toggle
+    let locationHtml = '';
+    if (hasGps) {
+        const latLon = `${loc.lat.toFixed(6)}, ${loc.lon.toFixed(6)}`;
+        const mgrs = latLonToMGRS(loc.lat, loc.lon);
+        locationHtml = `
+            <div class="info-row">
+                <span class="info-label">Coordinates:</span>
+                <span class="info-value coord-display" id="peerCoordDisplay">${showMGRS ? mgrs : latLon}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">MGRS:</span>
+                <span class="info-value">${mgrs}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Lat/Lon:</span>
+                <span class="info-value">${latLon}</span>
+            </div>
+        `;
+    } else if (peer.city_name) {
+        locationHtml = `
+            <div class="info-row">
+                <span class="info-label">Location:</span>
+                <span class="info-value">${peer.city_name}${peer.country_code ? ', ' + peer.country_code : ''}</span>
+            </div>
+        `;
+    }
 
     content.innerHTML = `
         <div class="peer-details">
             <div class="info-row">
                 <span class="info-label">Name:</span>
-                <span class="info-value">${peer.name || peer.hostname || 'Unknown'}</span>
+                <span class="info-value">${cleanName}</span>
             </div>
             <div class="info-row">
                 <span class="info-label">IP Address:</span>
@@ -1087,20 +1129,27 @@ function showPeerDetails(peer) {
                 <span class="info-value">${peer.groups.map(g => g.name || g).join(', ')}</span>
             </div>
             ` : ''}
-            ${peer.city_name ? `
-            <div class="info-row">
-                <span class="info-label">Location:</span>
-                <span class="info-value">${peer.city_name}${peer.country_code ? ', ' + peer.country_code : ''}</span>
-            </div>
-            ` : ''}
+            ${locationHtml}
         </div>
         <div class="btn-group" style="margin-top: 15px;">
             <button class="btn btn-primary" onclick="pingPeer('${peer.ip}')">PING</button>
+            ${hasGps ? `<button class="btn btn-secondary" onclick="centerMapOnPeer(${loc.lat}, ${loc.lon})">LOCATE</button>` : ''}
             <button class="btn btn-secondary" onclick="closePeerModal()">CLOSE</button>
         </div>
     `;
 
     modal.classList.remove('hidden');
+}
+
+function centerMapOnPeer(lat, lon) {
+    if (map) {
+        map.flyTo({
+            center: [lon, lat],
+            zoom: 12,
+            duration: 1500
+        });
+        closePeerModal();
+    }
 }
 
 function closePeerModal() {
@@ -1222,6 +1271,144 @@ function getLatencyClass(latency) {
     if (latency < 50) return 'good';
     if (latency < 100) return 'medium';
     return 'poor';
+}
+
+// MGRS conversion utilities
+let showMGRS = false; // Toggle between lat/long and MGRS
+
+function toggleCoordinateFormat() {
+    showMGRS = !showMGRS;
+    // Re-render peers to update coordinate display
+    if (allPeers.length > 0) {
+        renderPeers(allPeers);
+    }
+    // Update local node display
+    if (localNodeData) {
+        updateMapWithLocalNode();
+    }
+}
+
+function latLonToMGRS(lat, lon) {
+    // MGRS conversion algorithm
+    // This is a simplified implementation for common use cases
+    if (lat < -80 || lat > 84) {
+        return 'Outside MGRS coverage';
+    }
+
+    // UTM Zone calculation
+    let zone = Math.floor((lon + 180) / 6) + 1;
+
+    // Special zones for Norway and Svalbard
+    if (lat >= 56 && lat < 64 && lon >= 3 && lon < 12) zone = 32;
+    if (lat >= 72 && lat < 84) {
+        if (lon >= 0 && lon < 9) zone = 31;
+        else if (lon >= 9 && lon < 21) zone = 33;
+        else if (lon >= 21 && lon < 33) zone = 35;
+        else if (lon >= 33 && lon < 42) zone = 37;
+    }
+
+    // Latitude band letter
+    const latBands = 'CDEFGHJKLMNPQRSTUVWXX';
+    let bandIdx = Math.floor((lat + 80) / 8);
+    if (bandIdx > 20) bandIdx = 20;
+    const band = latBands[bandIdx];
+
+    // Convert to UTM
+    const latRad = lat * Math.PI / 180;
+    const lonRad = lon * Math.PI / 180;
+
+    const a = 6378137; // WGS84 semi-major axis
+    const f = 1 / 298.257223563; // WGS84 flattening
+    const k0 = 0.9996; // UTM scale factor
+
+    const e = Math.sqrt(2 * f - f * f);
+    const e2 = e * e / (1 - e * e);
+
+    const lonOrigin = (zone - 1) * 6 - 180 + 3;
+    const lonOriginRad = lonOrigin * Math.PI / 180;
+
+    const N = a / Math.sqrt(1 - e * e * Math.sin(latRad) * Math.sin(latRad));
+    const T = Math.tan(latRad) * Math.tan(latRad);
+    const C = e2 * Math.cos(latRad) * Math.cos(latRad);
+    const A = Math.cos(latRad) * (lonRad - lonOriginRad);
+
+    const M = a * ((1 - e * e / 4 - 3 * e * e * e * e / 64) * latRad
+        - (3 * e * e / 8 + 3 * e * e * e * e / 32) * Math.sin(2 * latRad)
+        + (15 * e * e * e * e / 256) * Math.sin(4 * latRad));
+
+    let easting = k0 * N * (A + (1 - T + C) * A * A * A / 6
+        + (5 - 18 * T + T * T + 72 * C - 58 * e2) * A * A * A * A * A / 120) + 500000;
+
+    let northing = k0 * (M + N * Math.tan(latRad) * (A * A / 2
+        + (5 - T + 9 * C + 4 * C * C) * A * A * A * A / 24
+        + (61 - 58 * T + T * T + 600 * C - 330 * e2) * A * A * A * A * A * A / 720));
+
+    if (lat < 0) northing += 10000000;
+
+    // 100km grid square letters
+    const set = ((zone - 1) % 6);
+    const col100k = Math.floor(easting / 100000);
+    const row100k = Math.floor(northing / 100000) % 20;
+
+    const letters1 = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const letters2 = 'ABCDEFGHJKLMNPQRSTUV';
+
+    let colLetter, rowLetter;
+    if (set % 2 === 0) {
+        colLetter = letters1[(col100k - 1 + (set / 2) * 8) % 24];
+    } else {
+        colLetter = letters1[(col100k - 1 + ((set - 1) / 2) * 8 + 8) % 24];
+    }
+
+    if (set < 3) {
+        rowLetter = letters2[(row100k + set * 5) % 20];
+    } else {
+        rowLetter = letters2[(row100k + (set - 3) * 5) % 20];
+    }
+
+    // Get 5-digit easting and northing within 100km square
+    const e5 = Math.floor(easting % 100000);
+    const n5 = Math.floor(northing % 100000);
+
+    return `${zone}${band} ${colLetter}${rowLetter} ${String(e5).padStart(5, '0').substring(0, 5)} ${String(n5).padStart(5, '0').substring(0, 5)}`;
+}
+
+function formatCoordinates(lat, lon) {
+    if (!lat || !lon || isNaN(lat) || isNaN(lon)) return '--';
+
+    if (showMGRS) {
+        return latLonToMGRS(lat, lon);
+    } else {
+        return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    }
+}
+
+function getPeerLocation(peer) {
+    // Try multiple possible field names for GPS coordinates
+    const lat = peer.location?.latitude || peer.geoLocation?.latitude || peer.latitude || peer.gps?.latitude;
+    const lon = peer.location?.longitude || peer.geoLocation?.longitude || peer.longitude || peer.gps?.longitude;
+    return { lat, lon };
+}
+
+function getCleanPeerName(peer) {
+    // Get clean peer name without FQDN or revealing VPN details
+    let name = peer.name || peer.hostname || '';
+
+    // Remove domain suffix if present
+    if (name.includes('.')) {
+        name = name.split('.')[0];
+    }
+
+    // Never show VPN-related names
+    const blockedTerms = ['netbird', 'wireguard', 'wg', 'vpn', 'tunnel'];
+    const nameLower = name.toLowerCase();
+    for (const term of blockedTerms) {
+        if (nameLower.includes(term)) {
+            return peer.ip || 'Peer';
+        }
+    }
+
+    return name || peer.ip || 'Unknown';
 }
 
 // ==================== KEYBOARD SHORTCUTS ====================
@@ -1742,7 +1929,8 @@ async function startSpeedtest(targetIP) {
 }
 
 function startSpeedtestPolling() {
-    let progressPercent = 0;
+    let lastResultCount = 0;
+    let testPhase = 'download'; // iperf3 does download first, then upload
 
     speedtestPollingInterval = setInterval(async () => {
         try {
@@ -1750,17 +1938,38 @@ function startSpeedtestPolling() {
             const status = await response.json();
 
             if (status.running) {
-                // Update progress
-                progressPercent = Math.min(progressPercent + 10, 95);
-                document.getElementById('speedtestProgressFill').style.width = `${progressPercent}%`;
-                document.getElementById('speedtestStatus').textContent = 'Testing throughput...';
+                // Update status text based on phase
+                const resultCount = status.results ? status.results.length : 0;
 
-                // Update gauges with latest result
+                // Detect phase change (roughly halfway = switch to upload)
+                if (resultCount > 5 && testPhase === 'download') {
+                    testPhase = 'upload';
+                }
+
+                // Calculate progress based on results (iperf3 typically sends ~10 interval results)
+                const progressPercent = Math.min((resultCount / 20) * 100, 95);
+                document.getElementById('speedtestProgressFill').style.width = `${progressPercent}%`;
+                document.getElementById('speedtestStatus').textContent =
+                    testPhase === 'download' ? 'Testing download...' : 'Testing upload...';
+
+                // Update gauges with live results
                 if (status.results && status.results.length > 0) {
                     const latest = status.results[status.results.length - 1];
                     const speedMbps = (latest.bits_per_second / 1000000).toFixed(1);
-                    updateSpeedGauge('download', speedMbps);
+
+                    // Update the appropriate gauge based on test phase
+                    if (testPhase === 'download') {
+                        updateSpeedGauge('download', speedMbps);
+                    } else {
+                        updateSpeedGauge('upload', speedMbps);
+                    }
+
+                    // Also update the status with live speed
+                    document.getElementById('speedtestStatus').textContent =
+                        `${testPhase === 'download' ? 'Download' : 'Upload'}: ${speedMbps} Mbps`;
                 }
+
+                lastResultCount = resultCount;
             } else {
                 clearInterval(speedtestPollingInterval);
                 speedtestPollingInterval = null;
@@ -1774,7 +1983,7 @@ function startSpeedtestPolling() {
         } catch (error) {
             console.error('Speedtest polling error:', error);
         }
-    }, 500);
+    }, 250); // Faster polling for more responsive updates
 }
 
 function updateSpeedGauge(type, speedMbps) {
@@ -1924,6 +2133,10 @@ function updateSubscriptionUI(data) {
 
     // Token card
     const tokenCard = document.getElementById('tokenStatusCard');
+    const tokenNameEl = document.getElementById('tokenName');
+    if (tokenNameEl) {
+        tokenNameEl.textContent = token.token_name || '--';
+    }
     document.getElementById('tokenExpiryDate').textContent = token.expiry_date || '--';
     document.getElementById('tokenLastUpdated').textContent = token.last_updated || '--';
 
@@ -2066,6 +2279,24 @@ async function saveSubscriptionConfig() {
         }
     } catch (error) {
         addLog('ERROR', 'Failed to save configuration: ' + error.message);
+    }
+}
+
+async function fetchTokenExpiry() {
+    addLog('INFO', 'Syncing token expiry from management server...');
+
+    try {
+        const response = await fetch('/api/subscription/fetch-token-expiry');
+        const data = await response.json();
+
+        if (response.ok) {
+            addLog('SUCCESS', `Token expiry synced: ${data.token.expiration_date}`);
+            fetchSubscriptionStatus();
+        } else {
+            addLog('ERROR', data.error || 'Failed to fetch token expiry');
+        }
+    } catch (error) {
+        addLog('ERROR', 'Failed to sync token: ' + error.message);
     }
 }
 

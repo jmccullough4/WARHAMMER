@@ -700,6 +700,88 @@ def api_subscription_configure():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/subscription/fetch-token-expiry')
+@login_required
+def api_fetch_token_expiry():
+    """Fetch token expiry from WARHAMMER management server API"""
+    try:
+        if not WARHAMMER_TOKEN:
+            return jsonify({'error': 'Management token not configured'}), 400
+
+        # First get current user info
+        user_response = requests.get(
+            f'https://{WARHAMMER_DOMAIN}/api/users/current',
+            headers=get_api_headers(),
+            timeout=10
+        )
+
+        if user_response.status_code != 200:
+            return jsonify({'error': 'Failed to get user info from management server'}), user_response.status_code
+
+        user_data = user_response.json()
+        user_id = user_data.get('id')
+
+        if not user_id:
+            return jsonify({'error': 'Could not determine user ID'}), 400
+
+        # Now get tokens for this user
+        tokens_response = requests.get(
+            f'https://{WARHAMMER_DOMAIN}/api/users/{user_id}/tokens',
+            headers=get_api_headers(),
+            timeout=10
+        )
+
+        if tokens_response.status_code != 200:
+            return jsonify({'error': 'Failed to get tokens from management server'}), tokens_response.status_code
+
+        tokens = tokens_response.json()
+
+        # Find the token with the nearest expiry (or the one currently in use)
+        if not tokens:
+            return jsonify({'error': 'No tokens found for user'}), 404
+
+        # Get the token with the soonest expiration
+        earliest_expiry = None
+        token_info = None
+
+        for token in tokens:
+            expiry = token.get('expiration_date')
+            if expiry:
+                # Parse ISO format date
+                try:
+                    expiry_date = datetime.fromisoformat(expiry.replace('Z', '+00:00'))
+                    if earliest_expiry is None or expiry_date < earliest_expiry:
+                        earliest_expiry = expiry_date
+                        token_info = {
+                            'name': token.get('name'),
+                            'expiration_date': expiry_date.strftime('%Y-%m-%d'),
+                            'created_at': token.get('created_at'),
+                            'last_used': token.get('last_used')
+                        }
+                except:
+                    pass
+
+        if token_info:
+            # Auto-update the stored token expiry
+            data = load_subscription_data()
+            data['netbird_token']['expiry_date'] = token_info['expiration_date']
+            data['netbird_token']['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            data['netbird_token']['token_name'] = token_info.get('name')
+            save_subscription_data(data)
+
+            return jsonify({
+                'status': 'success',
+                'token': token_info,
+                'subscription_status': get_subscription_status()
+            })
+        else:
+            return jsonify({'error': 'No valid token expiry found'}), 404
+
+    except requests.exceptions.Timeout:
+        return jsonify({'error': 'Request timeout'}), 504
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/warhammer/peers')
 @login_required
 @subscription_required
