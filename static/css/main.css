@@ -3179,3 +3179,98 @@ body {
     padding: 12px 30px;
     font-size: 14px;
 }
+
+/* ==================== APN/CELLULAR SETTINGS ==================== */
+
+.apn-connections {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.apn-connection-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.apn-connection-item:hover {
+    border-color: var(--accent-primary);
+}
+
+.apn-connection-item.active {
+    border-color: var(--accent-success);
+    background: rgba(48, 209, 88, 0.1);
+}
+
+.apn-connection-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.apn-connection-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.apn-active-badge {
+    font-size: 9px;
+    padding: 2px 6px;
+    background: var(--accent-success);
+    color: #000;
+    border-radius: 3px;
+    font-weight: 700;
+}
+
+.apn-connection-details {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 3px;
+}
+
+.apn-connection-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.apn-connection-actions .btn-sm {
+    padding: 4px 8px;
+    font-size: 10px;
+}
+
+.apn-form .setting-row {
+    margin-bottom: 12px;
+}
+
+.apn-form .setting-row label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.apn-form .input {
+    width: 100%;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.apn-form .input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}

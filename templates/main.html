@@ -414,6 +414,49 @@
                             <input type="text" id="settingsWhDomain" class="input" value="{{ warhammer_domain }}" readonly>
                         </div>
                     </div>
+
+                    <div class="settings-group">
+                        <h3>Cellular / APN Settings</h3>
+                        <div id="apnConnectionsList">
+                            <!-- Existing connections populated by JS -->
+                            <div style="color: var(--text-muted); font-size: 12px; padding: 10px 0;">
+                                Loading cellular connections...
+                            </div>
+                        </div>
+
+                        <div class="apn-form" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                            <h4 style="margin-bottom: 10px; color: var(--text-secondary);">Add/Update APN</h4>
+                            <div class="setting-row">
+                                <label>Connection Name:</label>
+                                <input type="text" id="apnConnectionName" class="input" value="WARHAMMER-Mobile" placeholder="Connection name">
+                            </div>
+                            <div class="setting-row">
+                                <label>APN:</label>
+                                <input type="text" id="apnName" class="input" placeholder="e.g., fast.t-mobile.com">
+                            </div>
+                            <div class="setting-row">
+                                <label>Username (optional):</label>
+                                <input type="text" id="apnUsername" class="input" placeholder="Leave blank if not required">
+                            </div>
+                            <div class="setting-row">
+                                <label>Password (optional):</label>
+                                <input type="password" id="apnPassword" class="input" placeholder="Leave blank if not required">
+                            </div>
+                            <div class="setting-row">
+                                <label class="toggle">
+                                    <input type="checkbox" id="apnAutoconnect" checked>
+                                    <span class="toggle-slider"></span>
+                                    <span class="toggle-label">Auto-connect</span>
+                                </label>
+                            </div>
+                            <div class="btn-group mt-10">
+                                <button class="btn btn-primary" onclick="saveApnSettings()">
+                                    SAVE APN
+                                </button>
+                            </div>
+                            <div id="apnStatus" style="margin-top: 10px; font-size: 12px;"></div>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="settingsDisplay" class="settings-content">

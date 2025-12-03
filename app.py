@@ -645,6 +645,232 @@ def get_cellular_status():
     except Exception as e:
         return jsonify({'error': str(e), 'available': False}), 500
 
+@app.route('/api/system/cellular/apn')
+@login_required
+def get_cellular_apn():
+    """Get current APN/cellular connection settings"""
+    try:
+        result = {
+            'connections': [],
+            'active_connection': None
+        }
+
+        # Get cellular connections from NetworkManager
+        try:
+            # List all GSM/cellular connections
+            nm_connections = subprocess.run(
+                ['nmcli', '-t', '-f', 'NAME,TYPE,DEVICE', 'connection', 'show'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if nm_connections.returncode == 0:
+                for line in nm_connections.stdout.strip().split('\n'):
+                    if not line:
+                        continue
+                    parts = line.split(':')
+                    if len(parts) >= 2 and parts[1] in ['gsm', 'cdma']:
+                        conn_name = parts[0]
+                        device = parts[2] if len(parts) > 2 else ''
+
+                        # Get detailed connection info
+                        conn_detail = subprocess.run(
+                            ['nmcli', '-t', '-f', 'gsm.apn,gsm.username,gsm.password,connection.autoconnect',
+                             'connection', 'show', conn_name],
+                            capture_output=True,
+                            text=True,
+                            timeout=5
+                        )
+
+                        conn_info = {
+                            'name': conn_name,
+                            'apn': '',
+                            'username': '',
+                            'password': '',
+                            'autoconnect': True,
+                            'active': bool(device)
+                        }
+
+                        if conn_detail.returncode == 0:
+                            for detail_line in conn_detail.stdout.strip().split('\n'):
+                                if ':' in detail_line:
+                                    key, value = detail_line.split(':', 1)
+                                    if key == 'gsm.apn':
+                                        conn_info['apn'] = value
+                                    elif key == 'gsm.username':
+                                        conn_info['username'] = value
+                                    elif key == 'gsm.password':
+                                        conn_info['password'] = value if value != '--' else ''
+                                    elif key == 'connection.autoconnect':
+                                        conn_info['autoconnect'] = value.lower() == 'yes'
+
+                        result['connections'].append(conn_info)
+                        if conn_info['active']:
+                            result['active_connection'] = conn_name
+
+        except FileNotFoundError:
+            pass
+        except subprocess.TimeoutExpired:
+            pass
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/system/cellular/apn', methods=['POST'])
+@login_required
+def set_cellular_apn():
+    """Create or update cellular APN settings"""
+    try:
+        data = request.json
+        apn = data.get('apn', '').strip()
+        username = data.get('username', '').strip()
+        password = data.get('password', '').strip()
+        connection_name = data.get('connection_name', 'WARHAMMER-Mobile').strip()
+        autoconnect = data.get('autoconnect', True)
+
+        if not apn:
+            return jsonify({'error': 'APN is required'}), 400
+
+        # Check if connection already exists
+        check_conn = subprocess.run(
+            ['nmcli', 'connection', 'show', connection_name],
+            capture_output=True,
+            text=True
+        )
+
+        if check_conn.returncode == 0:
+            # Update existing connection
+            cmd = ['sudo', 'nmcli', 'connection', 'modify', connection_name,
+                   'gsm.apn', apn,
+                   'connection.autoconnect', 'yes' if autoconnect else 'no']
+
+            if username:
+                cmd.extend(['gsm.username', username])
+            if password:
+                cmd.extend(['gsm.password', password])
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+            if result.returncode != 0:
+                return jsonify({'error': f'Failed to update connection: {result.stderr}'}), 500
+
+            action = 'updated'
+        else:
+            # Create new connection
+            cmd = ['sudo', 'nmcli', 'connection', 'add',
+                   'type', 'gsm',
+                   'ifname', '*',
+                   'con-name', connection_name,
+                   'gsm.apn', apn,
+                   'connection.autoconnect', 'yes' if autoconnect else 'no']
+
+            if username:
+                cmd.extend(['gsm.username', username])
+            if password:
+                cmd.extend(['gsm.password', password])
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+            if result.returncode != 0:
+                return jsonify({'error': f'Failed to create connection: {result.stderr}'}), 500
+
+            action = 'created'
+
+        # Activate the connection
+        activate = subprocess.run(
+            ['sudo', 'nmcli', 'connection', 'up', connection_name],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        return jsonify({
+            'success': True,
+            'action': action,
+            'connection_name': connection_name,
+            'activated': activate.returncode == 0,
+            'message': f'APN configuration {action} successfully' +
+                      (' and activated' if activate.returncode == 0 else ' (activation pending)')
+        })
+
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Operation timed out'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/system/cellular/apn/<connection_name>', methods=['DELETE'])
+@login_required
+def delete_cellular_apn(connection_name):
+    """Delete a cellular connection"""
+    try:
+        result = subprocess.run(
+            ['sudo', 'nmcli', 'connection', 'delete', connection_name],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode != 0:
+            return jsonify({'error': f'Failed to delete connection: {result.stderr}'}), 500
+
+        return jsonify({'success': True, 'message': f'Connection {connection_name} deleted'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/system/cellular/connect', methods=['POST'])
+@login_required
+def connect_cellular():
+    """Activate a cellular connection"""
+    try:
+        data = request.json
+        connection_name = data.get('connection_name')
+
+        if not connection_name:
+            return jsonify({'error': 'Connection name required'}), 400
+
+        result = subprocess.run(
+            ['sudo', 'nmcli', 'connection', 'up', connection_name],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode != 0:
+            return jsonify({'error': f'Failed to connect: {result.stderr}'}), 500
+
+        return jsonify({'success': True, 'message': f'Connected to {connection_name}'})
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Connection timed out'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/system/cellular/disconnect', methods=['POST'])
+@login_required
+def disconnect_cellular():
+    """Deactivate a cellular connection"""
+    try:
+        data = request.json
+        connection_name = data.get('connection_name')
+
+        if not connection_name:
+            return jsonify({'error': 'Connection name required'}), 400
+
+        result = subprocess.run(
+            ['sudo', 'nmcli', 'connection', 'down', connection_name],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+
+        if result.returncode != 0:
+            return jsonify({'error': f'Failed to disconnect: {result.stderr}'}), 500
+
+        return jsonify({'success': True, 'message': f'Disconnected from {connection_name}'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/network/interfaces')
 @login_required
 def get_network_interfaces():
