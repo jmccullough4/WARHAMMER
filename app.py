@@ -833,20 +833,30 @@ def sync_token_expiry():
     Returns dict with 'success', 'token_info', or 'error' keys
     """
     if not WARHAMMER_TOKEN:
+        print("[TOKEN SYNC] No management token configured")
         return {'error': 'Management token not configured'}
 
+    if not WARHAMMER_DOMAIN:
+        print("[TOKEN SYNC] No management domain configured")
+        return {'error': 'Management domain not configured'}
+
     try:
+        print(f"[TOKEN SYNC] Querying service users from {WARHAMMER_DOMAIN}...")
+
         # For Service Users, query the service users list directly
         users_response = requests.get(
             f'https://{WARHAMMER_DOMAIN}/api/users?service_user=true',
             headers=get_api_headers(),
-            timeout=10
+            timeout=15
         )
 
         if users_response.status_code != 200:
+            print(f"[TOKEN SYNC] Failed to query service users: HTTP {users_response.status_code}")
             return {'error': f'Failed to query service users: {users_response.status_code}'}
 
         users = users_response.json()
+        print(f"[TOKEN SYNC] Found {len(users)} service user(s)")
+
         if not users:
             return {'error': 'No service users found'}
 
@@ -854,24 +864,33 @@ def sync_token_expiry():
         all_tokens = []
         for user in users:
             user_id = user.get('id')
+            user_name = user.get('name', 'Unknown')
             if not user_id:
                 continue
+
+            print(f"[TOKEN SYNC] Fetching tokens for user: {user_name} ({user_id})")
 
             tokens_response = requests.get(
                 f'https://{WARHAMMER_DOMAIN}/api/users/{user_id}/tokens',
                 headers=get_api_headers(),
-                timeout=10
+                timeout=15
             )
 
             if tokens_response.status_code == 200:
                 tokens = tokens_response.json()
+                print(f"[TOKEN SYNC] Found {len(tokens)} token(s) for {user_name}")
                 for token in tokens:
                     token['user_id'] = user_id
-                    token['user_name'] = user.get('name', 'Unknown')
+                    token['user_name'] = user_name
                     all_tokens.append(token)
+            else:
+                print(f"[TOKEN SYNC] Failed to get tokens for {user_name}: HTTP {tokens_response.status_code}")
 
         if not all_tokens:
+            print("[TOKEN SYNC] No tokens found for any service user")
             return {'error': 'No tokens found for any service user'}
+
+        print(f"[TOKEN SYNC] Processing {len(all_tokens)} total token(s)...")
 
         # Find the token with the soonest expiration (most relevant)
         earliest_expiry = None
@@ -879,20 +898,24 @@ def sync_token_expiry():
 
         for token in all_tokens:
             expiry = token.get('expiration_date')
+            token_name = token.get('name', 'unnamed')
             if expiry:
                 try:
                     expiry_date = datetime.fromisoformat(expiry.replace('Z', '+00:00'))
+                    print(f"[TOKEN SYNC] Token '{token_name}' expires: {expiry_date.strftime('%Y-%m-%d')}")
                     if earliest_expiry is None or expiry_date < earliest_expiry:
                         earliest_expiry = expiry_date
                         token_info = {
-                            'name': token.get('name'),
+                            'name': token_name,
                             'expiration_date': expiry_date.strftime('%Y-%m-%d'),
                             'created_at': token.get('created_at'),
                             'last_used': token.get('last_used'),
                             'user_name': token.get('user_name')
                         }
                 except Exception as e:
-                    print(f"Error parsing token expiry: {e}")
+                    print(f"[TOKEN SYNC] Error parsing token '{token_name}' expiry '{expiry}': {e}")
+            else:
+                print(f"[TOKEN SYNC] Token '{token_name}' has no expiration_date field")
 
         if token_info:
             # Auto-update the stored token expiry
@@ -902,14 +925,20 @@ def sync_token_expiry():
             data['netbird_token']['token_name'] = token_info.get('name')
             save_subscription_data(data)
 
-            print(f"[TOKEN SYNC] Token expiry synced: {token_info['name']} expires {token_info['expiration_date']}")
+            print(f"[TOKEN SYNC] SUCCESS: {token_info['name']} expires {token_info['expiration_date']}")
             return {'success': True, 'token_info': token_info}
         else:
+            print("[TOKEN SYNC] No valid token expiry found in any token")
             return {'error': 'No valid token expiry found'}
 
     except requests.exceptions.Timeout:
+        print("[TOKEN SYNC] Request timed out")
         return {'error': 'Request timeout'}
+    except requests.exceptions.ConnectionError as e:
+        print(f"[TOKEN SYNC] Connection error: {e}")
+        return {'error': f'Connection error: {e}'}
     except Exception as e:
+        print(f"[TOKEN SYNC] Unexpected error: {e}")
         return {'error': str(e)}
 
 @app.route('/api/subscription/fetch-token-expiry')
