@@ -2138,3 +2138,22 @@ body {
     font-size: 11px;
     color: var(--text-muted);
 }
+
+/* ==================== ABOUT & VERSION ==================== */
+
+.about-upgrade {
+    margin-top: 25px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.about-upgrade .upgrade-btn {
+    width: 100%;
+    padding: 12px 20px;
+}
+
+.ops-version {
+    color: var(--accent-info);
+    font-family: var(--font-mono);
+    font-size: 11px;
+}

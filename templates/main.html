@@ -82,6 +82,9 @@
             <span class="ops-separator">|</span>
             <span class="ops-label">UPTIME:</span>
             <span class="ops-uptime" id="systemUptime">--</span>
+            <span class="ops-separator">|</span>
+            <span class="ops-label">VERSION:</span>
+            <span class="ops-version" id="opsVersion">{{ version }}</span>
         </div>
 
         <!-- Main Content -->
@@ -178,13 +181,6 @@
                             </button>
                             <button class="btn btn-danger btn-sm" onclick="confirmShutdown()">
                                 <span>&#9211;</span> SHUTDOWN
-                            </button>
-                        </div>
-
-                        <!-- System Upgrade -->
-                        <div class="upgrade-section">
-                            <button class="btn btn-primary btn-sm upgrade-btn" id="upgradeBtn" onclick="openUpgradeModal()">
-                                <span>&#11014;</span> SYSTEM UPGRADE
                             </button>
                         </div>
                     </div>
@@ -399,9 +395,16 @@
                             </svg>
                         </div>
                         <h2>WARHAMMER</h2>
-                        <p class="about-version">Version 2.1.0</p>
+                        <p class="about-version">Version <span id="appVersion">{{ version }}</span></p>
                         <p class="about-desc">Network Overlay Management System</p>
                         <p class="about-copy">Secure Tactical Network Infrastructure</p>
+
+                        <!-- System Upgrade -->
+                        <div class="about-upgrade">
+                            <button class="btn btn-primary upgrade-btn" id="upgradeBtn" onclick="openUpgradeModal()">
+                                <span>&#11014;</span> CHECK FOR UPDATES
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
