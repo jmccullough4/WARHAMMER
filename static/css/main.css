@@ -1539,7 +1539,11 @@ body {
     color: var(--text-muted);
 }
 
-/* Confirm Modal */
+/* Confirm Modal - needs higher z-index to appear above other modals */
+#confirmModal {
+    z-index: 2000;
+}
+
 .confirm-modal {
     max-width: 350px;
 }
