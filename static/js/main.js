@@ -157,6 +157,37 @@ async function fetchSystemInfo() {
     }
 }
 
+// Map interface names to friendly port names
+function getInterfaceDisplayName(ifaceName, hasBridge) {
+    // Port 1: enp87s0 or enp2s0
+    // Port 2: enp86s0 or enp1s0
+    if (ifaceName === 'enp87s0' || ifaceName === 'enp2s0') {
+        return 'Port 1 (' + ifaceName + ')';
+    }
+    if (ifaceName === 'enp86s0' || ifaceName === 'enp1s0') {
+        return 'Port 2 (' + ifaceName + ')';
+    }
+    if (ifaceName === 'br0') {
+        return 'Bridged (Port 1/2)(br0)';
+    }
+    return ifaceName;
+}
+
+// Check if interface should be hidden
+function shouldHideInterface(ifaceName, hasBridge) {
+    // Always hide wifi interface
+    if (ifaceName === 'wlo1') return true;
+
+    // Hide physical ethernet interfaces if bridge exists
+    if (hasBridge) {
+        if (['enp87s0', 'enp2s0', 'enp86s0', 'enp1s0'].includes(ifaceName)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 async function fetchNetworkInterfaces() {
     try {
         const response = await fetch('/api/network/interfaces');
@@ -169,9 +200,22 @@ async function fetchNetworkInterfaces() {
         const container = document.getElementById('interfaceList');
         container.innerHTML = '';
 
-        document.getElementById('interfaceCount').textContent = interfaces.length;
+        // Check if bridge interface (br0) exists
+        const hasBridge = interfaces.some(iface => iface.name === 'br0');
 
-        interfaces.forEach(iface => {
+        // Filter and sort interfaces
+        const filteredInterfaces = interfaces
+            .filter(iface => !shouldHideInterface(iface.name, hasBridge))
+            .sort((a, b) => {
+                // Put br0 first if it exists, then sort alphabetically
+                if (a.name === 'br0') return -1;
+                if (b.name === 'br0') return 1;
+                return a.name.localeCompare(b.name);
+            });
+
+        document.getElementById('interfaceCount').textContent = filteredInterfaces.length;
+
+        filteredInterfaces.forEach(iface => {
             const ipv4 = iface.addresses.find(a => a.type === 'ipv4');
             const div = document.createElement('div');
             div.className = `interface-item ${iface.is_up ? '' : 'down'}`;
@@ -182,9 +226,11 @@ async function fetchNetworkInterfaces() {
                 div.onclick = () => openInterfaceConfig(iface);
             }
 
+            const displayName = getInterfaceDisplayName(iface.name, hasBridge);
+
             div.innerHTML = `
                 <div class="interface-info">
-                    <div class="interface-name">${iface.name}${iface.configurable ? ' &#9881;' : ''}</div>
+                    <div class="interface-name">${displayName}${iface.configurable ? ' &#9881;' : ''}</div>
                     <div class="interface-ip">${ipv4 ? ipv4.address : 'No IP'}</div>
                 </div>
                 <span class="interface-status ${iface.is_up ? 'up' : 'down'}">
