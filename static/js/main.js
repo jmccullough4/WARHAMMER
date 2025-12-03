@@ -2543,7 +2543,7 @@ function updateCellularIndicator(data) {
         if (bar) {
             bar.classList.remove('active', 'weak', 'no-signal');
             if (i <= bars) {
-                // Weak signal (1-2 bars) shows yellow, good signal (3-4) shows green
+                // Weak signal (1-2 bars) shows amber, good signal (3-4) shows orange
                 bar.classList.add(bars <= 2 ? 'weak' : 'active');
             } else if (!data.connected) {
                 bar.classList.add('no-signal');
@@ -2557,12 +2557,20 @@ function updateCellularIndicator(data) {
         techEl.textContent = data.access_technology || '';
     }
 
-    // Update title/tooltip
-    let tooltip = `Cellular: ${data.connected ? 'Connected' : 'Disconnected'}`;
-    if (data.signal_quality) tooltip += `\nSignal: ${data.signal_quality}%`;
-    if (data.operator) tooltip += `\nOperator: ${data.operator}`;
-    if (data.access_technology) tooltip += `\nTech: ${data.access_technology}`;
-    indicator.title = tooltip;
+    // Update popup fields
+    const setField = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value || '--';
+    };
+
+    setField('cellOperator', data.operator);
+    setField('cellTechnology', data.access_technology);
+    setField('cellSignal', data.signal_quality ? `${data.signal_quality}%` : null);
+    setField('cellRSSI', data.rssi ? `${data.rssi} dBm` : null);
+    setField('cellPhone', data.phone_number);
+    setField('cellIMEI', data.imei);
+    setField('cellICCID', data.iccid);
+    setField('cellState', data.state);
 }
 
 // Initialize cellular check

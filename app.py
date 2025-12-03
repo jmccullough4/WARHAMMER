@@ -514,7 +514,11 @@ def get_cellular_status():
             'signal_bars': 0,
             'access_technology': None,
             'operator': None,
-            'registration': None
+            'state': None,
+            'rssi': None,
+            'imei': None,
+            'iccid': None,
+            'phone_number': None
         }
 
         # Check if ModemManager is available and get modem list
@@ -567,21 +571,52 @@ def get_cellular_status():
                         result['signal_bars'] = 0
 
                 # Parse state/connection
-                state_match = re.search(r'state:\s*(\w+)', output, re.IGNORECASE)
+                state_match = re.search(r'^\s*state:\s*[\'"]?(\w+)[\'"]?', output, re.MULTILINE | re.IGNORECASE)
                 if state_match:
                     state = state_match.group(1).lower()
+                    result['state'] = state
                     result['connected'] = state in ['connected', 'registered']
-                    result['registration'] = state
 
                 # Parse access technology (LTE, 5G, 3G, etc.)
-                tech_match = re.search(r'access tech:\s*(\w+)', output, re.IGNORECASE)
+                tech_match = re.search(r'access tech:\s*[\'"]?(\w+)[\'"]?', output, re.IGNORECASE)
                 if tech_match:
                     result['access_technology'] = tech_match.group(1).upper()
 
                 # Parse operator name
-                operator_match = re.search(r'operator name:\s*(.+)', output, re.IGNORECASE)
+                operator_match = re.search(r'operator name:\s*[\'"]?([^\'"\n]+)[\'"]?', output, re.IGNORECASE)
                 if operator_match:
                     result['operator'] = operator_match.group(1).strip()
+
+                # Parse IMEI (equipment id)
+                imei_match = re.search(r'equipment id:\s*[\'"]?(\d+)[\'"]?', output, re.IGNORECASE)
+                if imei_match:
+                    result['imei'] = imei_match.group(1)
+
+                # Parse phone number (own numbers)
+                phone_match = re.search(r'own[^:]*:\s*[\'"]?(\+?[\d\s-]+)[\'"]?', output, re.IGNORECASE)
+                if phone_match:
+                    result['phone_number'] = phone_match.group(1).strip()
+
+            # Get SIM info for ICCID
+            try:
+                # First get the SIM path
+                sim_path_match = re.search(r'primary sim path:\s*(/[^\s]+)', modem_info.stdout if modem_info.returncode == 0 else '', re.IGNORECASE)
+                if sim_path_match:
+                    sim_path = sim_path_match.group(1)
+                    sim_num_match = re.search(r'/SIM/(\d+)', sim_path)
+                    if sim_num_match:
+                        sim_info = subprocess.run(
+                            ['mmcli', '-i', sim_num_match.group(1)],
+                            capture_output=True,
+                            text=True,
+                            timeout=5
+                        )
+                        if sim_info.returncode == 0:
+                            iccid_match = re.search(r'iccid:\s*[\'"]?(\d+)[\'"]?', sim_info.stdout, re.IGNORECASE)
+                            if iccid_match:
+                                result['iccid'] = iccid_match.group(1)
+            except:
+                pass
 
             # Try to get more detailed signal info
             try:
@@ -593,14 +628,10 @@ def get_cellular_status():
                 )
                 if signal_info.returncode == 0:
                     output = signal_info.stdout
-                    # Parse RSSI, RSRP, etc. if available
+                    # Parse RSSI
                     rssi_match = re.search(r'rssi:\s*([-\d.]+)', output, re.IGNORECASE)
                     if rssi_match:
                         result['rssi'] = float(rssi_match.group(1))
-
-                    rsrp_match = re.search(r'rsrp:\s*([-\d.]+)', output, re.IGNORECASE)
-                    if rsrp_match:
-                        result['rsrp'] = float(rsrp_match.group(1))
             except:
                 pass
 
