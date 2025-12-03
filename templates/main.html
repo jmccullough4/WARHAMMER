@@ -63,6 +63,16 @@
             </div>
 
             <div class="header-right">
+                <!-- Cellular Signal Indicator -->
+                <div class="cellular-indicator hidden" id="cellularIndicator" title="Cellular Signal">
+                    <div class="signal-bars">
+                        <div class="signal-bar" id="bar1"></div>
+                        <div class="signal-bar" id="bar2"></div>
+                        <div class="signal-bar" id="bar3"></div>
+                        <div class="signal-bar" id="bar4"></div>
+                    </div>
+                    <span class="cellular-tech" id="cellularTech"></span>
+                </div>
                 <div class="operator-info">
                     <span class="info-label">OPERATOR:</span>
                     <span class="info-value">{{ username | upper }}</span>
@@ -383,9 +393,9 @@
                         <h3>Theme</h3>
                         <div class="setting-row">
                             <label class="toggle">
-                                <input type="checkbox" id="darkMode" checked disabled>
+                                <input type="checkbox" id="darkMode" checked onchange="toggleDarkMode()">
                                 <span class="toggle-slider"></span>
-                                <span class="toggle-label">Dark Mode (Always On)</span>
+                                <span class="toggle-label">Dark Mode</span>
                             </label>
                         </div>
                         <div class="setting-row">
@@ -400,49 +410,25 @@
 
                 <div id="settingsSubscription" class="settings-content">
                     <div class="settings-group">
-                        <h3>Subscription Status</h3>
-                        <div class="subscription-status-card" id="subscriptionStatusCard">
+                        <h3>License Status</h3>
+                        <div class="token-status-card" id="tokenStatusCard">
                             <div class="subscription-status-header">
                                 <span class="subscription-status-badge" id="subscriptionBadge">ACTIVE</span>
                                 <span class="subscription-tier" id="subscriptionTier">Standard</span>
                             </div>
                             <div class="subscription-details">
                                 <div class="setting-row">
-                                    <label>License Key:</label>
-                                    <span class="info-value" id="subLicenseKey">Not configured</span>
-                                </div>
-                                <div class="setting-row">
-                                    <label>Start Date:</label>
-                                    <span class="info-value" id="subStartDate">--</span>
-                                </div>
-                                <div class="setting-row">
-                                    <label>Expiry Date:</label>
-                                    <span class="info-value" id="subExpiryDate">--</span>
+                                    <label>Token Expiry:</label>
+                                    <span class="info-value" id="tokenExpiryDate">--</span>
                                 </div>
                                 <div class="setting-row">
                                     <label>Days Remaining:</label>
-                                    <span class="info-value days-remaining" id="subDaysRemaining">--</span>
+                                    <span class="info-value days-remaining" id="tokenDaysRemaining">--</span>
                                 </div>
-                            </div>
-                        </div>
-
-                        <h3>Management Token</h3>
-                        <div class="token-status-card" id="tokenStatusCard">
-                            <div class="setting-row">
-                                <label>Token Name:</label>
-                                <span class="info-value" id="tokenName">--</span>
-                            </div>
-                            <div class="setting-row">
-                                <label>Token Expiry:</label>
-                                <span class="info-value" id="tokenExpiryDate">--</span>
-                            </div>
-                            <div class="setting-row">
-                                <label>Days Remaining:</label>
-                                <span class="info-value days-remaining" id="tokenDaysRemaining">--</span>
-                            </div>
-                            <div class="setting-row">
-                                <label>Last Synced:</label>
-                                <span class="info-value" id="tokenLastUpdated">--</span>
+                                <div class="setting-row">
+                                    <label>Last Synced:</label>
+                                    <span class="info-value" id="tokenLastUpdated">--</span>
+                                </div>
                             </div>
                             <div class="btn-group mt-10">
                                 <button class="btn btn-secondary" onclick="fetchTokenExpiry()">
@@ -450,34 +436,19 @@
                                 </button>
                             </div>
                         </div>
-
-                        <h3>Configure Expiry Dates</h3>
-                        <div class="subscription-config">
-                            <div class="setting-row">
-                                <label>Subscription Expiry:</label>
-                                <input type="date" id="configSubExpiry" class="input">
-                            </div>
-                            <div class="setting-row">
-                                <label>Token Expiry:</label>
-                                <input type="date" id="configTokenExpiry" class="input">
-                            </div>
-                            <div class="setting-row">
-                                <label>License Key:</label>
-                                <input type="text" id="configLicenseKey" class="input" placeholder="XXXX-XXXX-XXXX">
-                            </div>
-                            <div class="btn-group mt-10">
-                                <button class="btn btn-primary" onclick="saveSubscriptionConfig()">SAVE CONFIGURATION</button>
-                            </div>
-                        </div>
                     </div>
 
-                    <!-- Alerts Section -->
-                    <div class="settings-group" id="subscriptionAlertsSection">
-                        <h3>Active Alerts</h3>
-                        <div class="subscription-alerts-list" id="subscriptionAlertsList">
-                            <div class="no-alerts">No active alerts</div>
-                        </div>
-                    </div>
+                    <!-- Hidden fields for compatibility -->
+                    <span id="subLicenseKey" class="hidden"></span>
+                    <span id="subStartDate" class="hidden"></span>
+                    <span id="subExpiryDate" class="hidden"></span>
+                    <span id="subDaysRemaining" class="hidden"></span>
+                    <span id="subscriptionStatusCard" class="hidden"></span>
+                    <input type="hidden" id="configSubExpiry">
+                    <input type="hidden" id="configTokenExpiry">
+                    <input type="hidden" id="configLicenseKey">
+                    <span id="tokenName" class="hidden"></span>
+                    <div id="subscriptionAlertsList" class="hidden"></div>
                 </div>
 
                 <div id="settingsAbout" class="settings-content">
