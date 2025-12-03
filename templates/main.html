@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WARHAMMER - {{ warhammer_name }}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='logo/favicon.svg') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    {% if mapbox_token %}
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.css" rel="stylesheet">
+    {% endif %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo-icon">
+                    <svg width="28" height="28" viewBox="0 0 100 100" fill="none">
+                        <rect x="20" y="15" width="60" height="25" rx="3" fill="url(#hg)" stroke="#ff6b35" stroke-width="2"/>
+                        <rect x="45" y="40" width="10" height="50" rx="2" fill="#3a2a1a" stroke="#ff6b35" stroke-width="1.5"/>
+                        <defs><linearGradient id="hg" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" style="stop-color:#ff8c42"/><stop offset="100%" style="stop-color:#cc3700"/>
+                        </linearGradient></defs>
+                    </svg>
+                </div>
+                <span class="logo-text">WARHAMMER</span>
+                <span class="header-divider">|</span>
+                <div class="status-indicator" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">CONNECTING</span>
+                </div>
+                <div class="activity-indicator" id="activityIndicator">
+                    <div class="radar-sweep"></div>
+                    <div class="radar-ping"></div>
+                </div>
+            </div>
+
+            <div class="header-center">
+                <div class="system-info">
+                    <span class="info-label">HOST:</span>
+                    <span class="info-value">{{ warhammer_name }}</span>
+                </div>
+                <div class="system-info hw-info">
+                    <span class="info-label">CPU:</span>
+                    <span class="info-value" id="cpuValue">--</span>
+                </div>
+                <div class="system-info hw-info">
+                    <span class="info-label">MEM:</span>
+                    <span class="info-value" id="memValue">--</span>
+                </div>
+                <div class="system-info">
+                    <span class="info-label">PEERS:</span>
+                    <span class="info-value peer-count" id="peerCount">0</span>
+                </div>
+            </div>
+
+            <div class="header-right">
+                <div class="operator-info">
+                    <span class="info-label">OPERATOR:</span>
+                    <span class="info-value">{{ username | upper }}</span>
+                </div>
+                <button class="settings-btn" onclick="openSettingsModal()">&#9881;</button>
+                <a href="{{ url_for('logout') }}" class="logout-btn">LOGOUT</a>
+            </div>
+        </header>
+
+        <!-- Operations Bar -->
+        <div class="operations-bar">
+            <span class="ops-label">NETWORK:</span>
+            <span class="ops-domain" id="netbirdDomain">{{ netbird_domain }}</span>
+            <span class="ops-separator">|</span>
+            <span class="ops-label">IP:</span>
+            <span class="ops-ip" id="managementIP">{{ management_ip }}</span>
+            <span class="ops-separator">|</span>
+            <span class="ops-label">UPTIME:</span>
+            <span class="ops-uptime" id="systemUptime">--</span>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Panel - Network Status -->
+            <div class="panel panel-left">
+                <!-- System Status Section -->
+                <div class="panel-section">
+                    <div class="section-header collapsible" onclick="toggleSection(this)">
+                        <span class="section-icon">&#128187;</span>
+                        <span>SYSTEM STATUS</span>
+                        <span class="section-toggle">&#9660;</span>
+                    </div>
+                    <div class="section-content">
+                        <div class="system-gauges">
+                            <div class="gauge-item">
+                                <div class="gauge-circle" id="cpuGauge">
+                                    <svg viewBox="0 0 100 100">
+                                        <circle class="gauge-bg" cx="50" cy="50" r="45"/>
+                                        <circle class="gauge-fill" cx="50" cy="50" r="45" id="cpuGaugeFill"/>
+                                    </svg>
+                                    <div class="gauge-value" id="cpuGaugeValue">0%</div>
+                                    <div class="gauge-label">CPU</div>
+                                </div>
+                            </div>
+                            <div class="gauge-item">
+                                <div class="gauge-circle" id="memGauge">
+                                    <svg viewBox="0 0 100 100">
+                                        <circle class="gauge-bg" cx="50" cy="50" r="45"/>
+                                        <circle class="gauge-fill" cx="50" cy="50" r="45" id="memGaugeFill"/>
+                                    </svg>
+                                    <div class="gauge-value" id="memGaugeValue">0%</div>
+                                    <div class="gauge-label">MEM</div>
+                                </div>
+                            </div>
+                            <div class="gauge-item">
+                                <div class="gauge-circle" id="diskGauge">
+                                    <svg viewBox="0 0 100 100">
+                                        <circle class="gauge-bg" cx="50" cy="50" r="45"/>
+                                        <circle class="gauge-fill" cx="50" cy="50" r="45" id="diskGaugeFill"/>
+                                    </svg>
+                                    <div class="gauge-value" id="diskGaugeValue">0%</div>
+                                    <div class="gauge-label">DISK</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="temp-display" id="tempDisplay">
+                            <span class="temp-icon">&#127777;</span>
+                            <span class="temp-value" id="tempValue">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Network Interfaces Section -->
+                <div class="panel-section">
+                    <div class="section-header collapsible" onclick="toggleSection(this)">
+                        <span class="section-icon">&#128268;</span>
+                        <span>INTERFACES</span>
+                        <span class="interface-count" id="interfaceCount">0</span>
+                        <span class="section-toggle">&#9660;</span>
+                    </div>
+                    <div class="section-content interface-list" id="interfaceList">
+                        <!-- Interfaces populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Services Section -->
+                <div class="panel-section">
+                    <div class="section-header collapsible" onclick="toggleSection(this)">
+                        <span class="section-icon">&#9881;</span>
+                        <span>SERVICES</span>
+                        <span class="section-toggle">&#9660;</span>
+                    </div>
+                    <div class="section-content service-list" id="serviceList">
+                        <!-- Services populated by JS -->
+                    </div>
+                </div>
+
+                <!-- SBC Controls -->
+                <div class="panel-section">
+                    <div class="section-header collapsible" onclick="toggleSection(this)">
+                        <span class="section-icon">&#128268;</span>
+                        <span>SBC CONTROLS</span>
+                        <span class="section-toggle">&#9660;</span>
+                    </div>
+                    <div class="section-content">
+                        <div class="sbc-info">
+                            <div class="sbc-model">LattePanda Sigma</div>
+                            <div class="sbc-details">Intel i5 | 16GB | NVMe</div>
+                        </div>
+                        <div class="btn-group">
+                            <button class="btn btn-warning btn-sm" onclick="confirmReboot()">
+                                <span>&#8635;</span> REBOOT
+                            </button>
+                            <button class="btn btn-danger btn-sm" onclick="confirmShutdown()">
+                                <span>&#9211;</span> SHUTDOWN
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center - Main Dashboard -->
+            <div class="center-content">
+                <!-- Network Traffic Chart -->
+                <div class="chart-panel">
+                    <div class="chart-header">
+                        <span class="chart-title">&#128200; NETWORK THROUGHPUT</span>
+                        <div class="chart-legend">
+                            <span class="legend-item rx"><span class="legend-color"></span>RX</span>
+                            <span class="legend-item tx"><span class="legend-color"></span>TX</span>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="networkChart"></canvas>
+                    </div>
+                    <div class="chart-stats">
+                        <div class="stat-box">
+                            <span class="stat-value rx" id="rxRate">0 B/s</span>
+                            <span class="stat-label">Download</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-value tx" id="txRate">0 B/s</span>
+                            <span class="stat-label">Upload</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-value" id="totalRx">0 B</span>
+                            <span class="stat-label">Total RX</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-value" id="totalTx">0 B</span>
+                            <span class="stat-label">Total TX</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Latency Monitor -->
+                <div class="chart-panel latency-panel">
+                    <div class="chart-header">
+                        <span class="chart-title">&#128225; PEER LATENCY</span>
+                    </div>
+                    <div class="chart-container chart-sm">
+                        <canvas id="latencyChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Peer Map (if Mapbox token provided) -->
+                {% if mapbox_token %}
+                <div class="map-panel">
+                    <div class="chart-header">
+                        <span class="chart-title">&#127757; PEER LOCATIONS</span>
+                        <div class="map-controls">
+                            <button class="btn btn-sm btn-map" onclick="centerMap()">&#8982; CENTER</button>
+                        </div>
+                    </div>
+                    <div class="map-container" id="mapContainer"></div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Right Panel - Peers -->
+            <div class="panel panel-right">
+                <!-- Netbird Status -->
+                <div class="panel-section">
+                    <div class="section-header">
+                        <span class="section-icon">&#128279;</span>
+                        <span>NETBIRD STATUS</span>
+                        <span class="netbird-status" id="netbirdStatus">CHECKING</span>
+                    </div>
+                    <div class="section-content">
+                        <div class="netbird-info" id="netbirdInfo">
+                            <div class="info-row">
+                                <span class="info-label">Version:</span>
+                                <span class="info-value" id="nbVersion">--</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Public Key:</span>
+                                <span class="info-value truncate" id="nbPubKey">--</span>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">FQDN:</span>
+                                <span class="info-value" id="nbFqdn">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Peers List -->
+                <div class="panel-section peers-section">
+                    <div class="section-header collapsible" onclick="toggleSection(this)">
+                        <span class="section-icon">&#128101;</span>
+                        <span>CONNECTED PEERS</span>
+                        <span class="device-counter" id="peerCounter">0</span>
+                        <span class="section-toggle">&#9660;</span>
+                    </div>
+                    <div class="peer-toolbar">
+                        <input type="text" class="peer-search" id="peerSearch" placeholder="Search peers..." oninput="filterPeers()">
+                        <button class="btn btn-sm" onclick="refreshPeers()">&#8635;</button>
+                    </div>
+                    <div class="peer-list" id="peerList">
+                        <!-- Peers populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Routes -->
+                <div class="panel-section">
+                    <div class="section-header collapsible" onclick="toggleSection(this)">
+                        <span class="section-icon">&#128739;</span>
+                        <span>ROUTES</span>
+                        <span class="route-counter" id="routeCounter">0</span>
+                        <span class="section-toggle">&#9660;</span>
+                    </div>
+                    <div class="section-content route-list" id="routeList">
+                        <!-- Routes populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Activity Log -->
+                <div class="panel-section log-section">
+                    <div class="section-header">
+                        <span class="section-icon">&#128196;</span>
+                        <span>ACTIVITY LOG</span>
+                        <button class="btn btn-sm" onclick="clearLog()">CLEAR</button>
+                    </div>
+                    <div class="log-container" id="logContainer">
+                        <!-- Logs populated by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal hidden">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <span>&#9881; SETTINGS</span>
+                <button class="modal-close" onclick="closeSettingsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-tabs">
+                    <button class="settings-tab active" onclick="showSettingsTab('general')">General</button>
+                    <button class="settings-tab" onclick="showSettingsTab('network')">Network</button>
+                    <button class="settings-tab" onclick="showSettingsTab('display')">Display</button>
+                    <button class="settings-tab" onclick="showSettingsTab('about')">About</button>
+                </div>
+
+                <div id="settingsGeneral" class="settings-content active">
+                    <div class="settings-group">
+                        <h3>Refresh Intervals</h3>
+                        <div class="setting-row">
+                            <label>Metrics Update (ms):</label>
+                            <input type="number" id="metricsInterval" class="input" value="2000" min="500" max="10000">
+                        </div>
+                        <div class="setting-row">
+                            <label>Peers Refresh (ms):</label>
+                            <input type="number" id="peersInterval" class="input" value="30000" min="5000" max="120000">
+                        </div>
+                    </div>
+                </div>
+
+                <div id="settingsNetwork" class="settings-content">
+                    <div class="settings-group">
+                        <h3>Netbird Configuration</h3>
+                        <div class="setting-row">
+                            <label>Domain:</label>
+                            <input type="text" id="settingsNbDomain" class="input" value="{{ netbird_domain }}" readonly>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="settingsDisplay" class="settings-content">
+                    <div class="settings-group">
+                        <h3>Theme</h3>
+                        <div class="setting-row">
+                            <label class="toggle">
+                                <input type="checkbox" id="darkMode" checked disabled>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Dark Mode (Always On)</span>
+                            </label>
+                        </div>
+                        <div class="setting-row">
+                            <label class="toggle">
+                                <input type="checkbox" id="animationsEnabled" checked>
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Enable Animations</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="settingsAbout" class="settings-content">
+                    <div class="about-section">
+                        <div class="about-logo">
+                            <svg width="80" height="80" viewBox="0 0 100 100">
+                                <rect x="20" y="15" width="60" height="25" rx="3" fill="url(#aboutHg)" stroke="#ff6b35" stroke-width="2"/>
+                                <rect x="45" y="40" width="10" height="50" rx="2" fill="#3a2a1a" stroke="#ff6b35" stroke-width="1.5"/>
+                                <defs><linearGradient id="aboutHg" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" style="stop-color:#ff8c42"/><stop offset="100%" style="stop-color:#cc3700"/>
+                                </linearGradient></defs>
+                            </svg>
+                        </div>
+                        <h2>WARHAMMER</h2>
+                        <p class="about-version">Version 2.0.0</p>
+                        <p class="about-desc">Network Overlay Management System</p>
+                        <p class="about-copy">Powered by Netbird &amp; LattePanda Sigma</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Modal -->
+    <div id="confirmModal" class="modal hidden">
+        <div class="modal-content confirm-modal">
+            <div class="modal-header">
+                <span id="confirmTitle">CONFIRM ACTION</span>
+            </div>
+            <div class="modal-body">
+                <p id="confirmMessage">Are you sure?</p>
+                <div class="btn-group">
+                    <button class="btn btn-danger" id="confirmYes">CONFIRM</button>
+                    <button class="btn btn-secondary" onclick="closeConfirmModal()">CANCEL</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Peer Details Modal -->
+    <div id="peerModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span>&#128101; PEER DETAILS</span>
+                <button class="modal-close" onclick="closePeerModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="peerModalContent">
+                <!-- Peer details populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script>
+        // Initialize with server-provided config
+        const CONFIG = {
+            mapboxToken: '{{ mapbox_token }}',
+            netbirdDomain: '{{ netbird_domain }}',
+            hostname: '{{ warhammer_name }}'
+        };
+
+        // Initialize app
+        document.addEventListener('DOMContentLoaded', () => {
+            initApp(CONFIG);
+        });
+    </script>
+</body>
+</html>
