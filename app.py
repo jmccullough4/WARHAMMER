@@ -880,6 +880,8 @@ def sync_token_expiry():
                 tokens = tokens_response.json()
                 print(f"[TOKEN SYNC] Found {len(tokens)} token(s) for {user_name}")
                 for token in tokens:
+                    # Log raw token data for debugging
+                    print(f"[TOKEN SYNC] Raw token data: {token}")
                     token['user_id'] = user_id
                     token['user_name'] = user_name
                     all_tokens.append(token)
