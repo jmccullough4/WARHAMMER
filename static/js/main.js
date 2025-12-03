@@ -674,12 +674,27 @@ function updateMapMarkers(peers) {
     const bounds = new mapboxgl.LngLatBounds();
     let hasValidCoords = false;
 
-    // Get local node IP to filter it out (avoid double plotting)
+    // Get local node identifiers to filter it out (avoid double plotting)
     const localIP = localNodeData?.ip || localNodeData?.localPeerState?.ip;
+    const localFQDN = localNodeData?.fqdn || localNodeData?.localPeerState?.fqdn;
+    const localHostname = CONFIG?.hostname?.toLowerCase();
 
     peers.forEach(peer => {
-        // Skip local peer - it's plotted separately with special styling
-        if (localIP && peer.ip === localIP) {
+        // Skip local peer - check multiple identifiers
+        const peerIP = peer.ip;
+        const peerFQDN = (peer.dns_label || peer.fqdn || '').toLowerCase();
+        const peerName = (peer.name || peer.hostname || '').toLowerCase();
+
+        // Match by IP
+        if (localIP && peerIP === localIP) {
+            return;
+        }
+        // Match by FQDN
+        if (localFQDN && peerFQDN && peerFQDN.includes(localFQDN.toLowerCase().split('.')[0])) {
+            return;
+        }
+        // Match by hostname
+        if (localHostname && peerName && (peerName.includes(localHostname) || localHostname.includes(peerName.split('.')[0]))) {
             return;
         }
 
