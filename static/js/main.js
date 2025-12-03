@@ -1246,6 +1246,161 @@ function showSettingsTab(tab) {
 
     document.getElementById(`settings${tab.charAt(0).toUpperCase() + tab.slice(1)}`).classList.add('active');
     event.target.classList.add('active');
+
+    // Load APN settings when Network tab is shown
+    if (tab === 'network') {
+        loadApnSettings();
+    }
+}
+
+// ==================== APN/CELLULAR MANAGEMENT ====================
+
+async function loadApnSettings() {
+    const container = document.getElementById('apnConnectionsList');
+
+    try {
+        const response = await fetch('/api/system/cellular/apn');
+        const data = await response.json();
+
+        if (data.error) {
+            container.innerHTML = `<div style="color: var(--accent-danger); font-size: 12px;">${data.error}</div>`;
+            return;
+        }
+
+        if (data.connections.length === 0) {
+            container.innerHTML = `
+                <div style="color: var(--text-muted); font-size: 12px; padding: 10px 0;">
+                    No cellular connections configured. Add an APN below to connect.
+                </div>`;
+            return;
+        }
+
+        let html = '<div class="apn-connections">';
+        data.connections.forEach(conn => {
+            html += `
+                <div class="apn-connection-item ${conn.active ? 'active' : ''}">
+                    <div class="apn-connection-info">
+                        <div class="apn-connection-name">
+                            ${conn.name}
+                            ${conn.active ? '<span class="apn-active-badge">CONNECTED</span>' : ''}
+                        </div>
+                        <div class="apn-connection-details">
+                            APN: ${conn.apn || 'Not set'}
+                            ${conn.username ? ` | User: ${conn.username}` : ''}
+                        </div>
+                    </div>
+                    <div class="apn-connection-actions">
+                        ${conn.active ?
+                            `<button class="btn btn-sm btn-warning" onclick="toggleApnConnection('${conn.name}', false)">Disconnect</button>` :
+                            `<button class="btn btn-sm btn-primary" onclick="toggleApnConnection('${conn.name}', true)">Connect</button>`
+                        }
+                        <button class="btn btn-sm" onclick="editApnConnection('${conn.name}', '${conn.apn}', '${conn.username}', '${conn.autoconnect}')">Edit</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteApnConnection('${conn.name}')">&#10005;</button>
+                    </div>
+                </div>`;
+        });
+        html += '</div>';
+        container.innerHTML = html;
+
+    } catch (error) {
+        container.innerHTML = `<div style="color: var(--accent-danger); font-size: 12px;">Failed to load APN settings: ${error.message}</div>`;
+    }
+}
+
+async function saveApnSettings() {
+    const statusEl = document.getElementById('apnStatus');
+    statusEl.innerHTML = '<span style="color: var(--accent-info);">Saving...</span>';
+
+    const data = {
+        connection_name: document.getElementById('apnConnectionName').value.trim(),
+        apn: document.getElementById('apnName').value.trim(),
+        username: document.getElementById('apnUsername').value.trim(),
+        password: document.getElementById('apnPassword').value,
+        autoconnect: document.getElementById('apnAutoconnect').checked
+    };
+
+    if (!data.apn) {
+        statusEl.innerHTML = '<span style="color: var(--accent-danger);">APN is required</span>';
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/system/cellular/apn', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            statusEl.innerHTML = `<span style="color: var(--accent-danger);">${result.error}</span>`;
+        } else {
+            statusEl.innerHTML = `<span style="color: var(--accent-success);">${result.message}</span>`;
+            // Clear form
+            document.getElementById('apnName').value = '';
+            document.getElementById('apnUsername').value = '';
+            document.getElementById('apnPassword').value = '';
+            // Reload list
+            loadApnSettings();
+            // Refresh cellular indicator
+            setTimeout(fetchCellularStatus, 2000);
+        }
+    } catch (error) {
+        statusEl.innerHTML = `<span style="color: var(--accent-danger);">Failed: ${error.message}</span>`;
+    }
+}
+
+function editApnConnection(name, apn, username, autoconnect) {
+    document.getElementById('apnConnectionName').value = name;
+    document.getElementById('apnName').value = apn || '';
+    document.getElementById('apnUsername').value = username || '';
+    document.getElementById('apnAutoconnect').checked = autoconnect === 'true';
+    document.getElementById('apnStatus').innerHTML = '<span style="color: var(--accent-info);">Editing existing connection - click Save to update</span>';
+}
+
+async function deleteApnConnection(name) {
+    if (!confirm(`Delete cellular connection "${name}"?`)) return;
+
+    try {
+        const response = await fetch(`/api/system/cellular/apn/${encodeURIComponent(name)}`, {
+            method: 'DELETE'
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            alert(result.error);
+        } else {
+            loadApnSettings();
+        }
+    } catch (error) {
+        alert(`Failed to delete: ${error.message}`);
+    }
+}
+
+async function toggleApnConnection(name, connect) {
+    const endpoint = connect ? '/api/system/cellular/connect' : '/api/system/cellular/disconnect';
+
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ connection_name: name })
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            alert(result.error);
+        } else {
+            loadApnSettings();
+            // Refresh cellular indicator after a delay
+            setTimeout(fetchCellularStatus, 3000);
+        }
+    } catch (error) {
+        alert(`Failed: ${error.message}`);
+    }
 }
 
 // ==================== CONFIRM DIALOGS ====================

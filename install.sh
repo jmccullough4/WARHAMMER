@@ -321,15 +321,17 @@ create_netplan_config() {
     mkdir -p "${INSTALL_DIR}/config"
 
     # Create a sample netplan config for bridged mode with DHCP
+    # Uses NetworkManager as renderer for better cellular/modem support
     cat > "${INSTALL_DIR}/config/netplan-bridge-dhcp.yaml" << 'EOF'
 # WARHAMMER Netplan Configuration
 # Bridge with DHCP from upstream (Port 1) + static IPs
+# Uses NetworkManager for better cellular/modem support
 #
 # Copy this to /etc/netplan/01-warhammer.yaml and run: sudo netplan apply
 #
 network:
   version: 2
-  renderer: networkd
+  renderer: NetworkManager
   ethernets:
     # Port 1 - WAN/Upstream (will be bridged)
     enp87s0:
@@ -339,12 +341,6 @@ network:
     enp86s0:
       dhcp4: false
       dhcp6: false
-    # Cellular modem (if present)
-    wwan0:
-      dhcp4: true
-      dhcp4-overrides:
-        route-metric: 700
-      optional: true
   bridges:
     br0:
       interfaces: [enp87s0, enp86s0]
@@ -359,16 +355,19 @@ network:
       parameters:
         stp: false
         forward-delay: 0
+# Note: Cellular/modem connections are managed via NetworkManager (nmcli)
+# Use the WARHAMMER UI or: nmcli connection add type gsm ifname "*" con-name "Mobile" apn "YOUR_APN"
 EOF
 
     # Create a sample netplan config for unbridged mode
     cat > "${INSTALL_DIR}/config/netplan-unbridged.yaml" << 'EOF'
 # WARHAMMER Netplan Configuration
 # Unbridged mode - Port 1 gets DHCP, Port 2 is static
+# Uses NetworkManager for better cellular/modem support
 #
 network:
   version: 2
-  renderer: networkd
+  renderer: NetworkManager
   ethernets:
     # Port 1 - WAN/Upstream with DHCP
     enp87s0:
@@ -380,12 +379,8 @@ network:
       addresses:
         - 10.109.100.1/24
         - 18.18.18.18/32
-    # Cellular modem (if present)
-    wwan0:
-      dhcp4: true
-      dhcp4-overrides:
-        route-metric: 700
-      optional: true
+# Note: Cellular/modem connections are managed via NetworkManager (nmcli)
+# Use the WARHAMMER UI or: nmcli connection add type gsm ifname "*" con-name "Mobile" apn "YOUR_APN"
 EOF
 
     success "Netplan templates created in ${INSTALL_DIR}/config/"
@@ -477,6 +472,13 @@ root ALL=(ALL) NOPASSWD: /usr/sbin/brctl *
 root ALL=(ALL) NOPASSWD: /usr/bin/netplan apply
 root ALL=(ALL) NOPASSWD: /sbin/dhclient *
 root ALL=(ALL) NOPASSWD: /usr/sbin/ebtables *
+
+# NetworkManager/nmcli for cellular APN management
+root ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection add *
+root ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection modify *
+root ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection delete *
+root ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection up *
+root ALL=(ALL) NOPASSWD: /usr/bin/nmcli connection down *
 
 # Service management
 root ALL=(ALL) NOPASSWD: /bin/systemctl start netbird
