@@ -1216,9 +1216,275 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+// ==================== SYSTEM UPGRADE ====================
+
+let upgradePollingInterval = null;
+
+function openUpgradeModal() {
+    document.getElementById('upgradeModal').classList.remove('hidden');
+    document.getElementById('upgradeInitial').classList.remove('hidden');
+    document.getElementById('upgradeProgress').classList.add('hidden');
+    document.getElementById('upgradeComplete').classList.add('hidden');
+    document.getElementById('upgradeFailed').classList.add('hidden');
+    document.getElementById('upgradeModalClose').style.display = '';
+}
+
+function closeUpgradeModal() {
+    if (upgradePollingInterval) {
+        clearInterval(upgradePollingInterval);
+        upgradePollingInterval = null;
+    }
+    document.getElementById('upgradeModal').classList.add('hidden');
+    // Reset upgrade status on server
+    fetch('/api/system/upgrade/reset', { method: 'POST' });
+}
+
+async function startUpgrade() {
+    document.getElementById('upgradeInitial').classList.add('hidden');
+    document.getElementById('upgradeProgress').classList.remove('hidden');
+    document.getElementById('upgradeModalClose').style.display = 'none';
+
+    try {
+        const response = await fetch('/api/system/upgrade', { method: 'POST' });
+        const data = await response.json();
+
+        if (response.ok) {
+            addLog('INFO', 'System upgrade started');
+            startUpgradePolling();
+        } else {
+            addLog('ERROR', data.error || 'Failed to start upgrade');
+            showUpgradeError(data.error || 'Failed to start upgrade');
+        }
+    } catch (error) {
+        addLog('ERROR', 'Upgrade failed: ' + error.message);
+        showUpgradeError(error.message);
+    }
+}
+
+function startUpgradePolling() {
+    upgradePollingInterval = setInterval(async () => {
+        try {
+            const response = await fetch('/api/system/upgrade/status');
+            const status = await response.json();
+            updateUpgradeUI(status);
+
+            if (!status.running) {
+                clearInterval(upgradePollingInterval);
+                upgradePollingInterval = null;
+
+                if (status.completed) {
+                    showUpgradeComplete();
+                } else if (status.error) {
+                    showUpgradeError(status.error);
+                }
+            }
+        } catch (error) {
+            console.error('Polling error:', error);
+        }
+    }, 1000);
+}
+
+function updateUpgradeUI(status) {
+    document.getElementById('upgradeStage').textContent = status.stage || 'Processing...';
+    document.getElementById('upgradeProgressFill').style.width = `${status.progress}%`;
+
+    const logContainer = document.getElementById('upgradeLog');
+    logContainer.innerHTML = status.log.map(entry => {
+        let cssClass = '';
+        if (entry.includes('[INFO]')) cssClass = 'info';
+        else if (entry.includes('[OK]')) cssClass = 'ok';
+        else if (entry.includes('[WARN]')) cssClass = 'warn';
+        else if (entry.includes('[ERROR]')) cssClass = 'error';
+        else if (entry.includes('[SUCCESS]')) cssClass = 'success';
+
+        return `<div class="upgrade-log-entry ${cssClass}">${entry}</div>`;
+    }).join('');
+    logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+function showUpgradeComplete() {
+    document.getElementById('upgradeProgress').classList.add('hidden');
+    document.getElementById('upgradeComplete').classList.remove('hidden');
+    document.getElementById('upgradeModalClose').style.display = '';
+    addLog('SUCCESS', 'System upgrade completed');
+}
+
+function showUpgradeError(error) {
+    document.getElementById('upgradeProgress').classList.add('hidden');
+    document.getElementById('upgradeFailed').classList.remove('hidden');
+    document.getElementById('upgradeError').textContent = error;
+    document.getElementById('upgradeModalClose').style.display = '';
+}
+
+function retryUpgrade() {
+    document.getElementById('upgradeFailed').classList.add('hidden');
+    startUpgrade();
+}
+
+// Listen for upgrade progress via websocket
+if (typeof socket !== 'undefined' && socket) {
+    socket.on('upgrade_progress', (data) => {
+        updateUpgradeUI(data);
+    });
+}
+
+// ==================== RESIZABLE PANELS ====================
+
+let resizeState = {
+    active: false,
+    section: null,
+    startY: 0,
+    startHeight: 0
+};
+
+function initResizablePanels() {
+    const sections = document.querySelectorAll('.panel-section .section-content');
+
+    sections.forEach(content => {
+        const section = content.closest('.panel-section');
+        if (!section) return;
+
+        // Add resize handle
+        const handle = document.createElement('div');
+        handle.className = 'resize-handle';
+        section.appendChild(handle);
+        section.classList.add('resizable');
+
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            resizeState.active = true;
+            resizeState.section = content;
+            resizeState.startY = e.clientY;
+            resizeState.startHeight = content.offsetHeight;
+            handle.classList.add('active');
+            document.body.style.cursor = 'ns-resize';
+        });
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!resizeState.active) return;
+
+        const delta = e.clientY - resizeState.startY;
+        const newHeight = Math.max(50, Math.min(500, resizeState.startHeight + delta));
+        resizeState.section.style.maxHeight = newHeight + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (resizeState.active) {
+            resizeState.active = false;
+            document.body.style.cursor = '';
+            document.querySelectorAll('.resize-handle.active').forEach(h => h.classList.remove('active'));
+        }
+    });
+}
+
+// Initialize resizable panels after DOM is ready
+document.addEventListener('DOMContentLoaded', initResizablePanels);
+
+// ==================== ENHANCED MAP WITH LOCAL NODE ====================
+
+let localNodeData = null;
+
+async function fetchLocalNodeInfo() {
+    try {
+        const response = await fetch('/api/warhammer/status');
+        if (response.ok) {
+            localNodeData = await response.json();
+
+            // Update map with local node
+            if (map && localNodeData) {
+                updateMapWithLocalNode();
+            }
+        }
+    } catch (error) {
+        console.error('Failed to fetch local node info:', error);
+    }
+}
+
+function updateMapWithLocalNode() {
+    if (!map || !localNodeData) return;
+
+    // Remove existing local node marker
+    if (peerMarkers['local-node']) {
+        peerMarkers['local-node'].remove();
+        delete peerMarkers['local-node'];
+    }
+
+    // Check for local node location (from netbird status)
+    const localIP = localNodeData.ip || localNodeData.localPeerState?.ip;
+    const fqdn = localNodeData.fqdn || localNodeData.localPeerState?.fqdn;
+
+    // Try to get location from local node data
+    let lat = localNodeData.location?.latitude ||
+              localNodeData.localPeerState?.location?.latitude ||
+              localNodeData.geoNameID?.latitude;
+    let lng = localNodeData.location?.longitude ||
+              localNodeData.localPeerState?.location?.longitude ||
+              localNodeData.geoNameID?.longitude;
+
+    // If we have valid coordinates, add local node marker
+    if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+        const el = document.createElement('div');
+        el.className = 'map-marker local-node online';
+        el.innerHTML = `
+            <div class="marker-dot"></div>
+            <div class="marker-pulse"></div>
+            <div class="marker-label">LOCAL</div>
+        `;
+        el.title = 'Local Node';
+
+        const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
+            <div class="map-popup">
+                <strong>LOCAL NODE</strong>
+                <div>${localIP || '--'}</div>
+                <div style="font-size: 10px; color: #888;">${fqdn || ''}</div>
+                <div class="popup-status online">ONLINE</div>
+            </div>
+        `);
+
+        const marker = new mapboxgl.Marker(el)
+            .setLngLat([lng, lat])
+            .setPopup(popup)
+            .addTo(map);
+
+        peerMarkers['local-node'] = marker;
+    }
+}
+
+// Override the updateMapMarkers to also update local node
+const originalUpdateMapMarkers = updateMapMarkers;
+function updateMapMarkersEnhanced(peers) {
+    // Call original function
+    originalUpdateMapMarkers(peers);
+
+    // Also update local node
+    updateMapWithLocalNode();
+
+    // Show placeholder if no markers
+    const container = document.getElementById('mapContainer');
+    if (container && Object.keys(peerMarkers).length === 0) {
+        if (!container.querySelector('.map-placeholder')) {
+            // Map exists but no markers - peers may not have location data
+            console.log('No peers with GPS data available for map display');
+        }
+    }
+}
+
+// Replace the global updateMapMarkers
+if (typeof updateMapMarkers !== 'undefined') {
+    window.updateMapMarkers = updateMapMarkersEnhanced;
+}
+
+// Fetch local node info on init and periodically
+document.addEventListener('DOMContentLoaded', () => {
+    fetchLocalNodeInfo();
+    setInterval(fetchLocalNodeInfo, 60000); // Refresh every minute
+});
+
 // ==================== CLEANUP ====================
 
 window.addEventListener('beforeunload', () => {
     Object.values(refreshIntervals).forEach(interval => clearInterval(interval));
+    if (upgradePollingInterval) clearInterval(upgradePollingInterval);
     if (socket) socket.disconnect();
 });

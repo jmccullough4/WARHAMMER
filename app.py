@@ -645,6 +645,141 @@ def remove_interface_ip(iface):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ==================== SYSTEM UPGRADE ====================
+
+upgrade_status = {
+    'running': False,
+    'progress': 0,
+    'stage': '',
+    'log': [],
+    'error': None,
+    'completed': False
+}
+
+def run_upgrade_task():
+    """Background task to run system upgrade"""
+    global upgrade_status
+    upgrade_status = {
+        'running': True,
+        'progress': 0,
+        'stage': 'Starting upgrade...',
+        'log': [],
+        'error': None,
+        'completed': False
+    }
+
+    try:
+        # Stage 1: Update package lists
+        upgrade_status['stage'] = 'Updating package lists...'
+        upgrade_status['progress'] = 10
+        upgrade_status['log'].append('[INFO] Running apt update...')
+        socketio.emit('upgrade_progress', upgrade_status)
+
+        result = subprocess.run(
+            ['sudo', 'apt', 'update', '-y'],
+            capture_output=True, text=True, timeout=300
+        )
+        if result.returncode != 0:
+            raise Exception(f"apt update failed: {result.stderr}")
+        upgrade_status['log'].append('[OK] Package lists updated')
+
+        # Stage 2: Upgrade packages
+        upgrade_status['stage'] = 'Upgrading packages...'
+        upgrade_status['progress'] = 30
+        upgrade_status['log'].append('[INFO] Running apt upgrade...')
+        socketio.emit('upgrade_progress', upgrade_status)
+
+        result = subprocess.run(
+            ['sudo', 'apt', 'upgrade', '-y'],
+            capture_output=True, text=True, timeout=1800
+        )
+        if result.returncode != 0:
+            raise Exception(f"apt upgrade failed: {result.stderr}")
+        upgrade_status['log'].append('[OK] System packages upgraded')
+        upgrade_status['progress'] = 60
+        socketio.emit('upgrade_progress', upgrade_status)
+
+        # Stage 3: Update WARHAMMER application (git pull)
+        upgrade_status['stage'] = 'Updating WARHAMMER application...'
+        upgrade_status['progress'] = 70
+        upgrade_status['log'].append('[INFO] Checking for WARHAMMER updates...')
+        socketio.emit('upgrade_progress', upgrade_status)
+
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        if os.path.exists(os.path.join(app_dir, '.git')):
+            result = subprocess.run(
+                ['git', 'pull', '--ff-only'],
+                cwd=app_dir,
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode == 0:
+                upgrade_status['log'].append(f'[OK] WARHAMMER updated: {result.stdout.strip()}')
+            else:
+                upgrade_status['log'].append(f'[WARN] Git pull skipped: {result.stderr.strip()}')
+        else:
+            upgrade_status['log'].append('[INFO] Not a git repository, skipping app update')
+
+        # Stage 4: Cleanup
+        upgrade_status['stage'] = 'Cleaning up...'
+        upgrade_status['progress'] = 85
+        upgrade_status['log'].append('[INFO] Running apt autoremove...')
+        socketio.emit('upgrade_progress', upgrade_status)
+
+        subprocess.run(['sudo', 'apt', 'autoremove', '-y'], capture_output=True, timeout=300)
+        upgrade_status['log'].append('[OK] Cleanup completed')
+
+        # Done
+        upgrade_status['stage'] = 'Upgrade completed successfully!'
+        upgrade_status['progress'] = 100
+        upgrade_status['completed'] = True
+        upgrade_status['running'] = False
+        upgrade_status['log'].append('[SUCCESS] System upgrade completed')
+        socketio.emit('upgrade_progress', upgrade_status)
+
+    except Exception as e:
+        upgrade_status['error'] = str(e)
+        upgrade_status['running'] = False
+        upgrade_status['stage'] = 'Upgrade failed'
+        upgrade_status['log'].append(f'[ERROR] {str(e)}')
+        socketio.emit('upgrade_progress', upgrade_status)
+
+@app.route('/api/system/upgrade', methods=['POST'])
+@login_required
+def start_system_upgrade():
+    """Start system upgrade in background"""
+    global upgrade_status
+
+    if upgrade_status['running']:
+        return jsonify({'error': 'Upgrade already in progress'}), 409
+
+    # Start upgrade in background thread
+    upgrade_thread = threading.Thread(target=run_upgrade_task, daemon=True)
+    upgrade_thread.start()
+
+    return jsonify({'status': 'started', 'message': 'System upgrade started'})
+
+@app.route('/api/system/upgrade/status')
+@login_required
+def get_upgrade_status():
+    """Get current upgrade status"""
+    return jsonify(upgrade_status)
+
+@app.route('/api/system/upgrade/reset', methods=['POST'])
+@login_required
+def reset_upgrade_status():
+    """Reset upgrade status after completion"""
+    global upgrade_status
+    if not upgrade_status['running']:
+        upgrade_status = {
+            'running': False,
+            'progress': 0,
+            'stage': '',
+            'log': [],
+            'error': None,
+            'completed': False
+        }
+    return jsonify({'status': 'reset'})
+
 # ==================== WEBSOCKET HANDLERS ====================
 
 @socketio.on('connect')

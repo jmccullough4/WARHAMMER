@@ -180,6 +180,13 @@
                                 <span>&#9211;</span> SHUTDOWN
                             </button>
                         </div>
+
+                        <!-- System Upgrade -->
+                        <div class="upgrade-section">
+                            <button class="btn btn-primary btn-sm upgrade-btn" id="upgradeBtn" onclick="openUpgradeModal()">
+                                <span>&#11014;</span> SYSTEM UPGRADE
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -487,6 +494,66 @@
             </div>
             <div class="modal-body" id="interfaceModalContent">
                 <!-- Interface config populated by JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- System Upgrade Modal -->
+    <div id="upgradeModal" class="modal hidden">
+        <div class="modal-content upgrade-modal">
+            <div class="modal-header">
+                <span>&#11014; SYSTEM UPGRADE</span>
+                <button class="modal-close" onclick="closeUpgradeModal()" id="upgradeModalClose">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="upgradeInitial">
+                    <p style="margin-bottom: 15px; color: var(--text-secondary);">
+                        This will update system packages and check for WARHAMMER application updates.
+                    </p>
+                    <ul style="margin-bottom: 20px; font-size: 12px; color: var(--text-muted); list-style: none;">
+                        <li>&#8226; Updates apt package lists</li>
+                        <li>&#8226; Upgrades installed packages</li>
+                        <li>&#8226; Pulls latest WARHAMMER code (if git repo)</li>
+                        <li>&#8226; Cleans up unused packages</li>
+                    </ul>
+                    <div class="btn-group">
+                        <button class="btn btn-primary" onclick="startUpgrade()">START UPGRADE</button>
+                        <button class="btn btn-secondary" onclick="closeUpgradeModal()">CANCEL</button>
+                    </div>
+                </div>
+
+                <div id="upgradeProgress" class="hidden">
+                    <div class="upgrade-stage" id="upgradeStage">Initializing...</div>
+                    <div class="upgrade-progress-bar">
+                        <div class="upgrade-progress-fill" id="upgradeProgressFill" style="width: 0%"></div>
+                    </div>
+                    <div class="upgrade-log" id="upgradeLog">
+                        <!-- Log entries populated by JS -->
+                    </div>
+                </div>
+
+                <div id="upgradeComplete" class="hidden">
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <span style="font-size: 40px;">&#9989;</span>
+                        <h3 style="color: var(--accent-success); margin-top: 10px;">Upgrade Complete</h3>
+                    </div>
+                    <div class="upgrade-complete-actions">
+                        <button class="btn btn-warning" onclick="confirmReboot()">REBOOT NOW</button>
+                        <button class="btn btn-secondary" onclick="closeUpgradeModal()">CLOSE</button>
+                    </div>
+                </div>
+
+                <div id="upgradeFailed" class="hidden">
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <span style="font-size: 40px;">&#10060;</span>
+                        <h3 style="color: var(--accent-danger); margin-top: 10px;">Upgrade Failed</h3>
+                        <p id="upgradeError" style="color: var(--text-muted); font-size: 12px;"></p>
+                    </div>
+                    <div class="upgrade-complete-actions">
+                        <button class="btn btn-primary" onclick="retryUpgrade()">RETRY</button>
+                        <button class="btn btn-secondary" onclick="closeUpgradeModal()">CLOSE</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

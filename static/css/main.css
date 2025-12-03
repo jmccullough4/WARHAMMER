@@ -1927,3 +1927,214 @@ body {
         transform: translateX(50px);
     }
 }
+
+/* ==================== RESIZABLE PANELS ==================== */
+
+.panel-section {
+    position: relative;
+    min-height: 50px;
+}
+
+.panel-section.resizable {
+    overflow: hidden;
+}
+
+.section-content {
+    overflow-y: auto;
+    max-height: 300px;
+    transition: max-height 0.2s ease;
+}
+
+.panel-section.collapsed .section-content {
+    max-height: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+.resize-handle {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 6px;
+    background: linear-gradient(180deg, transparent, rgba(255, 107, 53, 0.1));
+    cursor: ns-resize;
+    transition: background 0.2s;
+    z-index: 10;
+}
+
+.resize-handle:hover,
+.resize-handle.active {
+    background: linear-gradient(180deg, transparent, rgba(255, 107, 53, 0.3));
+}
+
+.resize-handle::after {
+    content: '';
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 2px;
+    background: var(--accent-primary);
+    opacity: 0;
+    transition: opacity 0.2s;
+    border-radius: 1px;
+}
+
+.resize-handle:hover::after,
+.resize-handle.active::after {
+    opacity: 0.6;
+}
+
+/* ==================== UPGRADE UI ==================== */
+
+.upgrade-section {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid var(--border-color);
+}
+
+.upgrade-btn {
+    width: 100%;
+    margin-top: 10px;
+}
+
+.upgrade-progress-container {
+    margin-top: 15px;
+}
+
+.upgrade-progress-bar {
+    height: 8px;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+.upgrade-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    box-shadow: 0 0 10px rgba(255, 107, 53, 0.5);
+}
+
+.upgrade-stage {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent-primary);
+    margin-bottom: 8px;
+}
+
+.upgrade-log {
+    max-height: 150px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    padding: 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+}
+
+.upgrade-log-entry {
+    padding: 2px 0;
+    color: var(--text-secondary);
+}
+
+.upgrade-log-entry.info {
+    color: var(--accent-info);
+}
+
+.upgrade-log-entry.ok {
+    color: var(--accent-success);
+}
+
+.upgrade-log-entry.warn {
+    color: var(--accent-warning);
+}
+
+.upgrade-log-entry.error {
+    color: var(--accent-danger);
+}
+
+.upgrade-log-entry.success {
+    color: var(--accent-success);
+    font-weight: 600;
+}
+
+/* Upgrade Modal */
+.upgrade-modal {
+    max-width: 500px;
+}
+
+.upgrade-modal .modal-body {
+    padding: 20px;
+}
+
+.upgrade-complete-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.upgrade-complete-actions .btn {
+    flex: 1;
+}
+
+/* ==================== LOCAL NODE MARKER ==================== */
+
+.map-marker.local-node .marker-dot {
+    background: var(--accent-info);
+    box-shadow: 0 0 15px rgba(0, 212, 255, 0.8);
+    width: 14px;
+    height: 14px;
+}
+
+.map-marker.local-node .marker-pulse {
+    background: rgba(0, 212, 255, 0.3);
+    width: 28px;
+    height: 28px;
+}
+
+.map-marker.local-node .marker-label {
+    position: absolute;
+    bottom: -18px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--accent-info);
+    white-space: nowrap;
+    text-shadow: 0 0 3px rgba(0, 0, 0, 0.8);
+}
+
+/* ==================== MAP PLACEHOLDER ==================== */
+
+.map-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 200px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    color: var(--text-muted);
+}
+
+.map-placeholder-icon {
+    font-size: 48px;
+    margin-bottom: 15px;
+    opacity: 0.5;
+}
+
+.map-placeholder-text {
+    font-size: 14px;
+    margin-bottom: 5px;
+}
+
+.map-placeholder-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+}
