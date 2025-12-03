@@ -2475,3 +2475,365 @@ body {
     padding: 1px 4px;
     border-radius: 2px;
 }
+
+/* ==================== SUBSCRIPTION MANAGEMENT ==================== */
+
+/* Operations Bar Subscription Status */
+.ops-subscription {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 3px;
+    transition: all 0.2s ease;
+}
+
+.ops-subscription:hover {
+    background: rgba(255, 107, 53, 0.1);
+}
+
+.ops-subscription.warning {
+    background: rgba(255, 176, 0, 0.1);
+    animation: pulse-warning 2s infinite;
+}
+
+.ops-subscription.expired {
+    background: rgba(255, 59, 48, 0.15);
+    animation: pulse-danger 1.5s infinite;
+}
+
+.ops-subscription-status {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+.ops-subscription-status.active {
+    color: var(--accent-success);
+}
+
+.ops-subscription-status.caution {
+    color: var(--accent-warning);
+}
+
+.ops-subscription-status.warning {
+    color: #ff9500;
+}
+
+.ops-subscription-status.expired {
+    color: var(--accent-danger);
+}
+
+@keyframes pulse-warning {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+@keyframes pulse-danger {
+    0%, 100% { opacity: 1; background: rgba(255, 59, 48, 0.15); }
+    50% { opacity: 0.9; background: rgba(255, 59, 48, 0.25); }
+}
+
+/* Subscription Alert Banner */
+.subscription-alert-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    background: linear-gradient(90deg, rgba(255, 176, 0, 0.15), rgba(255, 176, 0, 0.05));
+    border-bottom: 1px solid var(--accent-warning);
+    font-size: 13px;
+}
+
+.subscription-alert-banner.hidden {
+    display: none;
+}
+
+.subscription-alert-banner.info {
+    background: linear-gradient(90deg, rgba(0, 212, 255, 0.1), transparent);
+    border-bottom-color: var(--accent-info);
+}
+
+.subscription-alert-banner.warning {
+    background: linear-gradient(90deg, rgba(255, 176, 0, 0.15), rgba(255, 176, 0, 0.05));
+    border-bottom-color: var(--accent-warning);
+}
+
+.subscription-alert-banner.critical {
+    background: linear-gradient(90deg, rgba(255, 149, 0, 0.2), rgba(255, 149, 0, 0.05));
+    border-bottom-color: #ff9500;
+}
+
+.subscription-alert-banner.expired {
+    background: linear-gradient(90deg, rgba(255, 59, 48, 0.2), rgba(255, 59, 48, 0.05));
+    border-bottom-color: var(--accent-danger);
+}
+
+.subscription-alert-banner .alert-icon {
+    font-size: 18px;
+}
+
+.subscription-alert-banner.warning .alert-icon,
+.subscription-alert-banner.info .alert-icon {
+    color: var(--accent-warning);
+}
+
+.subscription-alert-banner.critical .alert-icon {
+    color: #ff9500;
+}
+
+.subscription-alert-banner.expired .alert-icon {
+    color: var(--accent-danger);
+}
+
+.subscription-alert-banner .alert-message {
+    flex: 1;
+    color: var(--text-primary);
+}
+
+.subscription-alert-banner .alert-action {
+    padding: 5px 12px;
+    background: rgba(255, 107, 53, 0.2);
+    border: 1px solid var(--accent-primary);
+    border-radius: 3px;
+    color: var(--accent-primary);
+    font-family: var(--font-primary);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.subscription-alert-banner .alert-action:hover {
+    background: var(--accent-primary);
+    color: var(--bg-primary);
+}
+
+.subscription-alert-banner .alert-dismiss {
+    padding: 4px 8px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 16px;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.subscription-alert-banner .alert-dismiss:hover {
+    color: var(--text-primary);
+}
+
+/* Subscription Settings Tab */
+.subscription-status-card,
+.token-status-card {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.subscription-status-card.expired,
+.token-status-card.expired {
+    border-color: var(--accent-danger);
+    background: rgba(255, 59, 48, 0.05);
+}
+
+.subscription-status-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.subscription-status-badge {
+    padding: 4px 12px;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+.subscription-status-badge.active {
+    background: rgba(48, 209, 88, 0.2);
+    color: var(--accent-success);
+    border: 1px solid var(--accent-success);
+}
+
+.subscription-status-badge.inactive {
+    background: rgba(88, 72, 56, 0.2);
+    color: var(--text-muted);
+    border: 1px solid var(--text-muted);
+}
+
+.subscription-status-badge.expired {
+    background: rgba(255, 59, 48, 0.2);
+    color: var(--accent-danger);
+    border: 1px solid var(--accent-danger);
+    animation: pulse-danger 1.5s infinite;
+}
+
+.subscription-tier {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent-info);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.subscription-details .setting-row {
+    padding: 8px 0;
+}
+
+.days-remaining {
+    font-weight: 600;
+}
+
+.days-remaining.good {
+    color: var(--accent-success);
+}
+
+.days-remaining.caution {
+    color: var(--accent-warning);
+}
+
+.days-remaining.warning {
+    color: #ff9500;
+}
+
+.days-remaining.critical {
+    color: var(--accent-danger);
+    animation: pulse-text 1s infinite;
+}
+
+.days-remaining.expired {
+    color: var(--accent-danger);
+    font-weight: 700;
+}
+
+@keyframes pulse-text {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* Subscription Config Form */
+.subscription-config {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    padding: 15px;
+    margin-top: 10px;
+}
+
+.subscription-config .setting-row {
+    margin-bottom: 12px;
+}
+
+.subscription-config input[type="date"],
+.subscription-config input[type="text"] {
+    width: 100%;
+    margin-top: 5px;
+}
+
+/* Subscription Alerts List */
+.subscription-alerts-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.no-alerts {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.subscription-alert-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    border-left: 3px solid var(--accent-info);
+}
+
+.subscription-alert-item.info {
+    border-left-color: var(--accent-info);
+}
+
+.subscription-alert-item.warning {
+    border-left-color: var(--accent-warning);
+    background: rgba(255, 176, 0, 0.05);
+}
+
+.subscription-alert-item.critical {
+    border-left-color: #ff9500;
+    background: rgba(255, 149, 0, 0.08);
+}
+
+.subscription-alert-item.expired {
+    border-left-color: var(--accent-danger);
+    background: rgba(255, 59, 48, 0.08);
+}
+
+.subscription-alert-item .alert-type {
+    font-size: 16px;
+}
+
+.subscription-alert-item .alert-text {
+    flex: 1;
+    font-size: 12px;
+    color: var(--text-primary);
+}
+
+.subscription-alert-item .btn {
+    padding: 4px 10px;
+    font-size: 10px;
+}
+
+/* Expired State Lockout Overlay */
+.subscription-lockout-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(10, 8, 8, 0.95);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    text-align: center;
+}
+
+.subscription-lockout-overlay .lockout-icon {
+    font-size: 60px;
+    margin-bottom: 20px;
+    color: var(--accent-danger);
+}
+
+.subscription-lockout-overlay h2 {
+    color: var(--accent-danger);
+    margin-bottom: 10px;
+    font-size: 24px;
+    letter-spacing: 3px;
+}
+
+.subscription-lockout-overlay p {
+    color: var(--text-secondary);
+    margin-bottom: 30px;
+    max-width: 400px;
+}
+
+.subscription-lockout-overlay .btn {
+    padding: 12px 30px;
+    font-size: 14px;
+}

@@ -1841,6 +1841,258 @@ if (typeof socket !== 'undefined' && socket) {
     });
 }
 
+// ==================== SUBSCRIPTION MANAGEMENT ====================
+
+let subscriptionData = null;
+let alertBannerDismissed = false;
+
+async function fetchSubscriptionStatus() {
+    try {
+        const response = await fetch('/api/subscription/status');
+        if (response.ok) {
+            subscriptionData = await response.json();
+            updateSubscriptionUI(subscriptionData);
+            checkSubscriptionAlerts(subscriptionData);
+        }
+    } catch (error) {
+        console.error('Failed to fetch subscription status:', error);
+    }
+}
+
+function updateSubscriptionUI(data) {
+    // Update operations bar
+    const opsStatus = document.getElementById('opsSubscriptionStatus');
+    const opsContainer = document.getElementById('opsSubscription');
+
+    if (data.is_expired) {
+        opsStatus.textContent = 'EXPIRED';
+        opsStatus.className = 'ops-subscription-status expired';
+        opsContainer.classList.add('expired');
+    } else if (data.subscription.days_remaining !== null) {
+        if (data.subscription.days_remaining <= 7) {
+            opsStatus.textContent = `${data.subscription.days_remaining}d`;
+            opsStatus.className = 'ops-subscription-status warning';
+            opsContainer.classList.add('warning');
+        } else if (data.subscription.days_remaining <= 30) {
+            opsStatus.textContent = `${data.subscription.days_remaining}d`;
+            opsStatus.className = 'ops-subscription-status caution';
+        } else {
+            opsStatus.textContent = `${data.subscription.days_remaining}d`;
+            opsStatus.className = 'ops-subscription-status active';
+        }
+    } else {
+        opsStatus.textContent = 'ACTIVE';
+        opsStatus.className = 'ops-subscription-status active';
+    }
+
+    // Update settings subscription tab
+    const sub = data.subscription;
+    const token = data.netbird_token;
+
+    // Subscription card
+    const badge = document.getElementById('subscriptionBadge');
+    const tier = document.getElementById('subscriptionTier');
+    const card = document.getElementById('subscriptionStatusCard');
+
+    if (data.is_expired) {
+        badge.textContent = 'EXPIRED';
+        badge.className = 'subscription-status-badge expired';
+        card.classList.add('expired');
+    } else if (sub.active) {
+        badge.textContent = 'ACTIVE';
+        badge.className = 'subscription-status-badge active';
+        card.classList.remove('expired');
+    } else {
+        badge.textContent = 'INACTIVE';
+        badge.className = 'subscription-status-badge inactive';
+    }
+
+    tier.textContent = (sub.tier || 'Standard').charAt(0).toUpperCase() + (sub.tier || 'Standard').slice(1);
+
+    document.getElementById('subLicenseKey').textContent = sub.license_key || 'Not configured';
+    document.getElementById('subStartDate').textContent = sub.start_date || '--';
+    document.getElementById('subExpiryDate').textContent = sub.expiry_date || '--';
+
+    const subDaysEl = document.getElementById('subDaysRemaining');
+    if (sub.days_remaining !== null) {
+        subDaysEl.textContent = sub.days_remaining + ' days';
+        subDaysEl.className = 'info-value days-remaining ' + getDaysClass(sub.days_remaining);
+    } else {
+        subDaysEl.textContent = '--';
+        subDaysEl.className = 'info-value days-remaining';
+    }
+
+    // Token card
+    const tokenCard = document.getElementById('tokenStatusCard');
+    document.getElementById('tokenExpiryDate').textContent = token.expiry_date || '--';
+    document.getElementById('tokenLastUpdated').textContent = token.last_updated || '--';
+
+    const tokenDaysEl = document.getElementById('tokenDaysRemaining');
+    if (token.days_remaining !== null) {
+        tokenDaysEl.textContent = token.days_remaining + ' days';
+        tokenDaysEl.className = 'info-value days-remaining ' + getDaysClass(token.days_remaining);
+        if (token.days_remaining < 0) {
+            tokenCard.classList.add('expired');
+        } else {
+            tokenCard.classList.remove('expired');
+        }
+    } else {
+        tokenDaysEl.textContent = '--';
+        tokenDaysEl.className = 'info-value days-remaining';
+    }
+
+    // Populate config form with current values
+    if (sub.expiry_date) {
+        document.getElementById('configSubExpiry').value = sub.expiry_date;
+    }
+    if (token.expiry_date) {
+        document.getElementById('configTokenExpiry').value = token.expiry_date;
+    }
+    if (sub.license_key) {
+        document.getElementById('configLicenseKey').value = sub.license_key;
+    }
+
+    // Update alerts list in settings
+    updateSubscriptionAlertsList(data.alerts);
+}
+
+function getDaysClass(days) {
+    if (days < 0) return 'expired';
+    if (days <= 3) return 'critical';
+    if (days <= 7) return 'warning';
+    if (days <= 30) return 'caution';
+    return 'good';
+}
+
+function checkSubscriptionAlerts(data) {
+    if (!data.alerts || data.alerts.length === 0 || alertBannerDismissed) {
+        document.getElementById('subscriptionAlertBanner').classList.add('hidden');
+        return;
+    }
+
+    // Show the most urgent alert in the banner
+    const urgentAlert = data.alerts.find(a => a.urgency === 'expired' || a.urgency === 'critical') ||
+                        data.alerts.find(a => a.urgency === 'warning') ||
+                        data.alerts[0];
+
+    if (urgentAlert) {
+        const banner = document.getElementById('subscriptionAlertBanner');
+        const message = document.getElementById('alertBannerMessage');
+
+        message.textContent = urgentAlert.message;
+        banner.className = 'subscription-alert-banner ' + urgentAlert.urgency;
+        banner.classList.remove('hidden');
+
+        // Log the alert
+        if (urgentAlert.urgency === 'expired' || urgentAlert.urgency === 'critical') {
+            addLog('ERROR', urgentAlert.message);
+        } else if (urgentAlert.urgency === 'warning') {
+            addLog('WARN', urgentAlert.message);
+        }
+    }
+}
+
+function dismissAlertBanner() {
+    alertBannerDismissed = true;
+    document.getElementById('subscriptionAlertBanner').classList.add('hidden');
+}
+
+function updateSubscriptionAlertsList(alerts) {
+    const container = document.getElementById('subscriptionAlertsList');
+
+    if (!alerts || alerts.length === 0) {
+        container.innerHTML = '<div class="no-alerts">No active alerts</div>';
+        return;
+    }
+
+    container.innerHTML = alerts.map(alert => `
+        <div class="subscription-alert-item ${alert.urgency}">
+            <span class="alert-type">${alert.type === 'subscription' ? '&#128179;' : '&#128273;'}</span>
+            <span class="alert-text">${alert.message}</span>
+            <button class="btn btn-sm" onclick="dismissAlert('${alert.id}')">Dismiss</button>
+        </div>
+    `).join('');
+}
+
+async function dismissAlert(alertId) {
+    try {
+        await fetch('/api/subscription/dismiss-alert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ alert_id: alertId })
+        });
+        fetchSubscriptionStatus();
+    } catch (error) {
+        addLog('ERROR', 'Failed to dismiss alert');
+    }
+}
+
+async function saveSubscriptionConfig() {
+    const subExpiry = document.getElementById('configSubExpiry').value;
+    const tokenExpiry = document.getElementById('configTokenExpiry').value;
+    const licenseKey = document.getElementById('configLicenseKey').value.trim();
+
+    if (!subExpiry && !tokenExpiry) {
+        addLog('ERROR', 'Please enter at least one expiry date');
+        return;
+    }
+
+    try {
+        const config = {};
+
+        if (subExpiry) {
+            config.subscription_expiry = subExpiry;
+        }
+        if (tokenExpiry) {
+            config.token_expiry = tokenExpiry;
+        }
+        if (licenseKey) {
+            config.license_key = licenseKey;
+        }
+
+        const response = await fetch('/api/subscription/configure', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            addLog('SUCCESS', 'Subscription configuration saved');
+            fetchSubscriptionStatus();
+        } else {
+            addLog('ERROR', data.error || 'Failed to save configuration');
+        }
+    } catch (error) {
+        addLog('ERROR', 'Failed to save configuration: ' + error.message);
+    }
+}
+
+// Handle subscription expiry lockout
+function handleSubscriptionExpired(response) {
+    if (response.status === 402) {
+        // Show expiry modal or banner
+        showConfirm(
+            'SUBSCRIPTION EXPIRED',
+            'Your WARHAMMER subscription has expired. Network features are disabled until you renew.',
+            () => {
+                openSettingsModal();
+                showSettingsTab('subscription');
+            }
+        );
+        return true;
+    }
+    return false;
+}
+
+// Initialize subscription check
+document.addEventListener('DOMContentLoaded', () => {
+    fetchSubscriptionStatus();
+    // Check subscription every 5 minutes
+    setInterval(fetchSubscriptionStatus, 300000);
+});
+
 // ==================== CLEANUP ====================
 
 window.addEventListener('beforeunload', () => {
