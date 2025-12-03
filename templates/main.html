@@ -280,8 +280,8 @@
                                 <span class="info-value truncate" id="whPubKey">--</span>
                             </div>
                             <div class="info-row">
-                                <span class="info-label">FQDN:</span>
-                                <span class="info-value" id="whFqdn">--</span>
+                                <span class="info-label">Network ID:</span>
+                                <span class="info-value truncate" id="whNetworkId">--</span>
                             </div>
                         </div>
                     </div>
@@ -297,6 +297,7 @@
                     </div>
                     <div class="peer-toolbar">
                         <input type="text" class="peer-search" id="peerSearch" placeholder="Search peers..." oninput="filterPeers()">
+                        <button class="btn btn-sm" onclick="toggleCoordinateFormat()" title="Toggle MGRS/Lat-Lon">&#127760;</button>
                         <button class="btn btn-sm" onclick="refreshPeers()">&#8635;</button>
                     </div>
                     <div class="peer-list" id="peerList">
@@ -425,8 +426,12 @@
                             </div>
                         </div>
 
-                        <h3>Netbird Token</h3>
+                        <h3>Management Token</h3>
                         <div class="token-status-card" id="tokenStatusCard">
+                            <div class="setting-row">
+                                <label>Token Name:</label>
+                                <span class="info-value" id="tokenName">--</span>
+                            </div>
                             <div class="setting-row">
                                 <label>Token Expiry:</label>
                                 <span class="info-value" id="tokenExpiryDate">--</span>
@@ -436,8 +441,13 @@
                                 <span class="info-value days-remaining" id="tokenDaysRemaining">--</span>
                             </div>
                             <div class="setting-row">
-                                <label>Last Updated:</label>
+                                <label>Last Synced:</label>
                                 <span class="info-value" id="tokenLastUpdated">--</span>
+                            </div>
+                            <div class="btn-group mt-10">
+                                <button class="btn btn-secondary" onclick="fetchTokenExpiry()">
+                                    &#8635; SYNC FROM SERVER
+                                </button>
                             </div>
                         </div>
 

@@ -922,6 +922,14 @@ body {
     color: var(--accent-primary);
 }
 
+.peer-coords {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--accent-info);
+    margin-top: 2px;
+    opacity: 0.8;
+}
+
 .peer-latency {
     font-family: var(--font-mono);
     font-size: 11px;
@@ -1752,6 +1760,62 @@ body {
 
 .form-actions .btn {
     flex: 1;
+}
+
+/* Route Modal Form Styling */
+#addRouteModal .modal-body .form-row {
+    display: block;
+    margin-bottom: 15px;
+}
+
+#addRouteModal .modal-body .form-row label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+#addRouteModal .modal-body .form-row .input,
+#addRouteModal .modal-body .form-row input,
+#addRouteModal .modal-body .form-row select {
+    width: 100%;
+    padding: 10px 12px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+#addRouteModal .modal-body .form-row .input:focus,
+#addRouteModal .modal-body .form-row input:focus,
+#addRouteModal .modal-body .form-row select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(255, 107, 53, 0.1);
+}
+
+#addRouteModal .modal-body .form-row .input::placeholder,
+#addRouteModal .modal-body .form-row input::placeholder {
+    color: var(--text-muted);
+}
+
+#addRouteModal .modal-body .form-row select {
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23ff6b35' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 30px;
+}
+
+#addRouteModal .modal-body .form-row select option {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
 }
 
 /* ==================== PEER DETAIL MODAL ==================== */
