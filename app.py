@@ -56,6 +56,92 @@ peer_latency_cache = {}
 latency_history = {}  # {peer_ip: [latency_values]}
 MAX_LATENCY_HISTORY = 30
 
+# GPS cache for local node location
+gps_cache = {
+    'latitude': None,
+    'longitude': None,
+    'altitude': None,
+    'speed': None,
+    'heading': None,
+    'fix_type': 0,
+    'satellites': 0,
+    'timestamp': None,
+    'error': None
+}
+
+def get_gpsd_data():
+    """Fetch GPS data from gpsd daemon"""
+    global gps_cache
+    try:
+        import socket
+        gpsd_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        gpsd_socket.settimeout(2)
+        gpsd_socket.connect(('localhost', 2947))
+
+        # Send watch command to start receiving data
+        gpsd_socket.send(b'?WATCH={"enable":true,"json":true}\n')
+
+        # Read responses until we get a TPV (position) report
+        buffer = ""
+        attempts = 0
+        max_attempts = 10
+
+        while attempts < max_attempts:
+            data = gpsd_socket.recv(4096).decode('utf-8')
+            buffer += data
+
+            # Process each complete JSON object
+            while '\n' in buffer:
+                line, buffer = buffer.split('\n', 1)
+                if line.strip():
+                    try:
+                        msg = json.loads(line)
+
+                        # TPV = Time-Position-Velocity report
+                        if msg.get('class') == 'TPV':
+                            gps_cache['latitude'] = msg.get('lat')
+                            gps_cache['longitude'] = msg.get('lon')
+                            gps_cache['altitude'] = msg.get('alt')
+                            gps_cache['speed'] = msg.get('speed')
+                            gps_cache['heading'] = msg.get('track')
+                            gps_cache['fix_type'] = msg.get('mode', 0)
+                            gps_cache['timestamp'] = time.time()
+                            gps_cache['error'] = None
+
+                            if gps_cache['latitude'] and gps_cache['longitude']:
+                                gpsd_socket.close()
+                                return gps_cache
+
+                        # SKY = Satellite info
+                        elif msg.get('class') == 'SKY':
+                            satellites = msg.get('satellites', [])
+                            gps_cache['satellites'] = len([s for s in satellites if s.get('used')])
+
+                    except json.JSONDecodeError:
+                        pass
+
+            attempts += 1
+
+        gpsd_socket.close()
+
+    except Exception as e:
+        gps_cache['error'] = str(e)
+
+    return gps_cache
+
+# Start background GPS polling thread
+def gps_polling_thread():
+    """Background thread to poll GPS data"""
+    while True:
+        try:
+            get_gpsd_data()
+        except:
+            pass
+        time.sleep(5)  # Poll every 5 seconds
+
+gps_thread = threading.Thread(target=gps_polling_thread, daemon=True)
+gps_thread.start()
+
 # ==================== AUTHENTICATION ====================
 
 def login_required(f):
@@ -261,12 +347,28 @@ def get_network_metrics():
 @app.route('/api/warhammer/status')
 @login_required
 def get_warhammer_status():
-    """Get WARHAMMER network daemon status"""
+    """Get WARHAMMER network daemon status with GPS location"""
     try:
         result = subprocess.run(['netbird', 'status', '--json'],
                               capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
             status = json.loads(result.stdout)
+
+            # Add GPS location data from gpsd
+            if gps_cache.get('latitude') and gps_cache.get('longitude'):
+                status['gps'] = {
+                    'latitude': gps_cache['latitude'],
+                    'longitude': gps_cache['longitude'],
+                    'altitude': gps_cache.get('altitude'),
+                    'speed': gps_cache.get('speed'),
+                    'heading': gps_cache.get('heading'),
+                    'fix_type': gps_cache.get('fix_type', 0),
+                    'satellites': gps_cache.get('satellites', 0),
+                    'timestamp': gps_cache.get('timestamp')
+                }
+            else:
+                status['gps'] = None
+
             return jsonify(status)
         else:
             return jsonify({'error': 'WARHAMMER network not running', 'details': result.stderr}), 503
@@ -276,6 +378,12 @@ def get_warhammer_status():
         return jsonify({'error': 'WARHAMMER network not installed'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/gps')
+@login_required
+def get_gps_location():
+    """Get current GPS location from gpsd"""
+    return jsonify(gps_cache)
 
 @app.route('/api/warhammer/peers')
 @login_required

@@ -1414,13 +1414,33 @@ function updateMapWithLocalNode() {
     const localIP = localNodeData.ip || localNodeData.localPeerState?.ip;
     const fqdn = localNodeData.fqdn || localNodeData.localPeerState?.fqdn;
 
-    // Try to get location from local node data
-    let lat = localNodeData.location?.latitude ||
+    // Try to get location - prioritize GPS data from gpsd
+    let lat = null;
+    let lng = null;
+    let gpsInfo = null;
+
+    // First try GPS data from gpsd (most accurate, real-time)
+    if (localNodeData.gps && localNodeData.gps.latitude && localNodeData.gps.longitude) {
+        lat = localNodeData.gps.latitude;
+        lng = localNodeData.gps.longitude;
+        gpsInfo = {
+            altitude: localNodeData.gps.altitude,
+            speed: localNodeData.gps.speed,
+            heading: localNodeData.gps.heading,
+            satellites: localNodeData.gps.satellites,
+            fix_type: localNodeData.gps.fix_type
+        };
+        console.log('Using GPS data from gpsd:', lat, lng);
+    }
+    // Fallback to netbird location data
+    else {
+        lat = localNodeData.location?.latitude ||
               localNodeData.localPeerState?.location?.latitude ||
               localNodeData.geoNameID?.latitude;
-    let lng = localNodeData.location?.longitude ||
+        lng = localNodeData.location?.longitude ||
               localNodeData.localPeerState?.location?.longitude ||
               localNodeData.geoNameID?.longitude;
+    }
 
     // If we have valid coordinates, add local node marker
     if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
@@ -1433,12 +1453,31 @@ function updateMapWithLocalNode() {
         `;
         el.title = 'Local Node';
 
+        // Build popup content with GPS info if available
+        let gpsDetails = '';
+        if (gpsInfo) {
+            const fixTypes = ['No Fix', 'No Fix', '2D Fix', '3D Fix'];
+            gpsDetails = `
+                <div style="margin-top: 8px; border-top: 1px solid #333; padding-top: 6px; font-size: 10px;">
+                    <div>&#128225; GPS Fix: ${fixTypes[gpsInfo.fix_type] || 'Unknown'}</div>
+                    <div>&#128752; Satellites: ${gpsInfo.satellites || 0}</div>
+                    ${gpsInfo.altitude ? `<div>&#9650; Alt: ${gpsInfo.altitude.toFixed(1)}m</div>` : ''}
+                    ${gpsInfo.speed ? `<div>&#128663; Speed: ${(gpsInfo.speed * 3.6).toFixed(1)} km/h</div>` : ''}
+                    ${gpsInfo.heading ? `<div>&#129517; Heading: ${gpsInfo.heading.toFixed(0)}°</div>` : ''}
+                </div>
+            `;
+        }
+
         const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
             <div class="map-popup">
                 <strong>LOCAL NODE</strong>
                 <div>${localIP || '--'}</div>
                 <div style="font-size: 10px; color: #888;">${fqdn || ''}</div>
+                <div style="font-size: 9px; color: #666; margin-top: 4px;">
+                    ${lat.toFixed(6)}, ${lng.toFixed(6)}
+                </div>
                 <div class="popup-status online">ONLINE</div>
+                ${gpsDetails}
             </div>
         `);
 
@@ -1448,6 +1487,11 @@ function updateMapWithLocalNode() {
             .addTo(map);
 
         peerMarkers['local-node'] = marker;
+
+        // Log success
+        addLog('INFO', `Local node GPS: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+    } else {
+        console.log('No GPS coordinates available for local node');
     }
 }
 
@@ -1478,7 +1522,7 @@ if (typeof updateMapMarkers !== 'undefined') {
 // Fetch local node info on init and periodically
 document.addEventListener('DOMContentLoaded', () => {
     fetchLocalNodeInfo();
-    setInterval(fetchLocalNodeInfo, 60000); // Refresh every minute
+    setInterval(fetchLocalNodeInfo, 10000); // Refresh every 10 seconds for GPS updates
 });
 
 // ==================== CLEANUP ====================
