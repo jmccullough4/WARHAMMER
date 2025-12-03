@@ -1798,7 +1798,7 @@ async function checkForUpdates() {
         const updates = await response.json();
 
         if (response.ok) {
-            const hasUIUpdates = updates.ui_update_available && updates.ui_commits && updates.ui_commits.length > 0;
+            const hasUIUpdates = updates.ui_update_available && updates.latest_commit;
             const hasSystemUpdates = updates.system_updates_available;
             const hasAnyUpdates = hasUIUpdates || hasSystemUpdates;
 
@@ -1812,18 +1812,26 @@ async function checkForUpdates() {
             // Build update preview HTML
             let html = '';
 
-            // UI Updates section
+            // UI Updates section - show only the most recent commit with full message
             if (hasUIUpdates) {
+                const commit = updates.latest_commit;
+                const commitsBehind = updates.commits_behind || 1;
                 html += `
                     <div class="update-section">
-                        <h4 style="color: var(--accent-primary); margin-bottom: 8px;">&#128230; UI Updates Available (${updates.ui_commits.length} commits)</h4>
-                        <div class="update-list">
-                            ${updates.ui_commits.map(c => `
-                                <div class="update-item">
-                                    <span class="commit-hash">${c.hash}</span>
-                                    <span class="commit-msg">${c.message}</span>
+                        <h4 style="color: var(--accent-primary); margin-bottom: 10px;">
+                            &#128230; WARHAMMER Update Available
+                            ${commitsBehind > 1 ? `<span style="font-size: 11px; font-weight: normal; color: var(--text-muted);"> (${commitsBehind} commits behind)</span>` : ''}
+                        </h4>
+                        <div class="latest-commit">
+                            <div class="commit-header">
+                                <span class="commit-hash">${commit.hash}</span>
+                                <span class="commit-subject">${commit.subject}</span>
+                            </div>
+                            ${commit.body ? `
+                                <div class="commit-body">
+                                    <pre>${commit.body}</pre>
                                 </div>
-                            `).join('')}
+                            ` : ''}
                         </div>
                     </div>
                 `;
@@ -1941,7 +1949,17 @@ function startUpgradePolling() {
                 upgradePollingInterval = null;
 
                 if (status.completed) {
-                    showUpgradeComplete(status.reboot_required, status.upgrade_type);
+                    // Check if service is restarting - reload page after delay
+                    if (status.service_restarting) {
+                        document.getElementById('upgradeStage').textContent = 'Service restarting... Page will reload automatically.';
+                        document.getElementById('upgradeProgressFill').style.width = '100%';
+                        // Reload page after service has time to restart
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 5000);
+                    } else {
+                        showUpgradeComplete(status.reboot_required, status.upgrade_type);
+                    }
                 } else if (status.error) {
                     showUpgradeError(status.error);
                 }

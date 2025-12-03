@@ -2115,13 +2115,30 @@ def run_upgrade_task(upgrade_type='full'):
             # UI-only never requires reboot
             upgrade_status['reboot_required'] = False
 
-        # Done
-        upgrade_status['stage'] = 'Upgrade completed successfully!'
+        # Done - notify client before restart
+        upgrade_status['stage'] = 'Upgrade completed! Restarting service...'
+        upgrade_status['progress'] = 95
+        upgrade_status['log'].append('[SUCCESS] Upgrade completed')
+        upgrade_status['log'].append('[INFO] Restarting WARHAMMER service...')
+        socketio.emit('upgrade_progress', upgrade_status)
+
+        # Give the client time to receive the message
+        time.sleep(2)
+
+        upgrade_status['stage'] = 'Service restarting...'
         upgrade_status['progress'] = 100
         upgrade_status['completed'] = True
         upgrade_status['running'] = False
-        upgrade_status['log'].append('[SUCCESS] Upgrade completed')
+        upgrade_status['service_restarting'] = True
         socketio.emit('upgrade_progress', upgrade_status)
+
+        # Schedule service restart after a short delay (allows response to be sent)
+        def restart_service():
+            time.sleep(1)
+            subprocess.run(['systemctl', 'restart', 'warhammer'], capture_output=True)
+
+        restart_thread = threading.Thread(target=restart_service, daemon=True)
+        restart_thread.start()
 
     except Exception as e:
         upgrade_status['error'] = str(e)
@@ -2138,7 +2155,7 @@ def check_for_updates():
         updates = {
             'ui_update_available': False,
             'system_updates_available': False,
-            'ui_commits': [],
+            'latest_commit': None,
             'system_packages': [],
             'current_version': APP_VERSION
         }
@@ -2153,29 +2170,47 @@ def check_for_updates():
                 cwd=app_dir, capture_output=True, timeout=30
             )
 
-            # Check for new commits
-            result = subprocess.run(
-                ['git', 'log', 'HEAD..origin/main', '--oneline', '--no-decorate'],
-                cwd=app_dir, capture_output=True, text=True, timeout=10
-            )
-
-            if result.returncode == 0 and result.stdout.strip():
-                commits = result.stdout.strip().split('\n')
-                updates['ui_update_available'] = True
-                updates['ui_commits'] = [{'hash': c.split()[0], 'message': ' '.join(c.split()[1:])} for c in commits if c]
-
             # Get current branch
             branch_result = subprocess.run(
                 ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
                 cwd=app_dir, capture_output=True, text=True, timeout=5
             )
-            if branch_result.returncode == 0:
-                updates['current_branch'] = branch_result.stdout.strip()
+            current_branch = branch_result.stdout.strip() if branch_result.returncode == 0 else 'main'
+            updates['current_branch'] = current_branch
+
+            # Check if there are new commits
+            result = subprocess.run(
+                ['git', 'rev-list', '--count', f'HEAD..origin/{current_branch}'],
+                cwd=app_dir, capture_output=True, text=True, timeout=10
+            )
+
+            if result.returncode == 0 and result.stdout.strip() and int(result.stdout.strip()) > 0:
+                updates['ui_update_available'] = True
+                updates['commits_behind'] = int(result.stdout.strip())
+
+                # Get the most recent commit message from remote (full message)
+                commit_result = subprocess.run(
+                    ['git', 'log', f'origin/{current_branch}', '-1', '--format=%H%n%s%n%b'],
+                    cwd=app_dir, capture_output=True, text=True, timeout=10
+                )
+
+                if commit_result.returncode == 0:
+                    lines = commit_result.stdout.strip().split('\n')
+                    commit_hash = lines[0] if lines else ''
+                    commit_subject = lines[1] if len(lines) > 1 else ''
+                    commit_body = '\n'.join(lines[2:]).strip() if len(lines) > 2 else ''
+
+                    updates['latest_commit'] = {
+                        'hash': commit_hash[:8],
+                        'subject': commit_subject,
+                        'body': commit_body,
+                        'full_message': commit_subject + ('\n\n' + commit_body if commit_body else '')
+                    }
 
         # Check for system updates (apt)
         try:
             # Update package lists quietly
-            subprocess.run(['sudo', 'apt', 'update', '-qq'], capture_output=True, timeout=60)
+            subprocess.run(['apt', 'update', '-qq'], capture_output=True, timeout=60)
 
             # Check upgradable packages
             result = subprocess.run(

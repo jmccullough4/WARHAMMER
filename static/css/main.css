@@ -3313,3 +3313,51 @@ body {
 #autoConfigBtn:disabled {
     cursor: not-allowed;
 }
+
+/* ==================== UPDATE PREVIEW COMMIT DISPLAY ==================== */
+
+.latest-commit {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 12px;
+}
+
+.commit-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.commit-hash {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    background: var(--accent-primary);
+    color: #000;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.commit-subject {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.commit-body {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
+}
+
+.commit-body pre {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin: 0;
+    line-height: 1.5;
+}
