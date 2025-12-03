@@ -13,17 +13,15 @@ let peerMarkers = {};
 let refreshIntervals = {};
 let lastMetrics = null;
 let logs = [];
+let allPeers = [];
+let allRoutes = [];
+let allGroups = [];
 
 const MAX_CHART_POINTS = 60;
 const chartData = {
     labels: [],
     rx: [],
     tx: []
-};
-
-const latencyData = {
-    labels: [],
-    values: []
 };
 
 // ==================== INITIALIZATION ====================
@@ -47,16 +45,18 @@ function initApp(config) {
     fetchSystemInfo();
     fetchNetworkInterfaces();
     fetchServices();
-    fetchNetbirdStatus();
+    fetchWarhammerStatus();
     fetchPeers();
     fetchRoutes();
+    fetchGroups();
 
     // Set up refresh intervals
     refreshIntervals.systemInfo = setInterval(fetchSystemInfo, 5000);
     refreshIntervals.interfaces = setInterval(fetchNetworkInterfaces, 10000);
     refreshIntervals.services = setInterval(fetchServices, 30000);
     refreshIntervals.peers = setInterval(fetchPeers, 15000);
-    refreshIntervals.netbird = setInterval(fetchNetbirdStatus, 30000);
+    refreshIntervals.warhammer = setInterval(fetchWarhammerStatus, 30000);
+    refreshIntervals.routes = setInterval(fetchRoutes, 60000);
 
     // Add initial log
     addLog('INFO', 'WARHAMMER interface initialized');
@@ -138,6 +138,12 @@ async function fetchSystemInfo() {
         // Update uptime
         document.getElementById('systemUptime').textContent = data.uptime;
 
+        // Update SBC info
+        if (data.cpu_info) {
+            const cpuShort = data.cpu_info.split('@')[0].trim();
+            document.getElementById('sbcDetails').textContent = cpuShort;
+        }
+
         // Update temperature
         if (data.temperatures && Object.keys(data.temperatures).length > 0) {
             const temp = Object.values(data.temperatures)[0];
@@ -169,9 +175,16 @@ async function fetchNetworkInterfaces() {
             const ipv4 = iface.addresses.find(a => a.type === 'ipv4');
             const div = document.createElement('div');
             div.className = `interface-item ${iface.is_up ? '' : 'down'}`;
+
+            // Make configurable interfaces clickable
+            if (iface.configurable) {
+                div.classList.add('configurable');
+                div.onclick = () => openInterfaceConfig(iface);
+            }
+
             div.innerHTML = `
                 <div class="interface-info">
-                    <div class="interface-name">${iface.name}</div>
+                    <div class="interface-name">${iface.name}${iface.configurable ? ' &#9881;' : ''}</div>
                     <div class="interface-ip">${ipv4 ? ipv4.address : 'No IP'}</div>
                 </div>
                 <span class="interface-status ${iface.is_up ? 'up' : 'down'}">
@@ -215,44 +228,44 @@ async function fetchServices() {
     }
 }
 
-async function fetchNetbirdStatus() {
+async function fetchWarhammerStatus() {
     try {
-        const response = await fetch('/api/netbird/status');
+        const response = await fetch('/api/warhammer/status');
         const data = await response.json();
 
-        const statusEl = document.getElementById('netbirdStatus');
+        const statusEl = document.getElementById('warhammerStatus');
 
         if (data.error) {
             statusEl.textContent = 'OFFLINE';
-            statusEl.className = 'netbird-status disconnected';
+            statusEl.className = 'warhammer-status disconnected';
             return;
         }
 
         statusEl.textContent = 'CONNECTED';
-        statusEl.className = 'netbird-status connected';
+        statusEl.className = 'warhammer-status connected';
 
         // Update details
         if (data.daemonVersion) {
-            document.getElementById('nbVersion').textContent = data.daemonVersion;
+            document.getElementById('whVersion').textContent = data.daemonVersion;
         }
         if (data.publicKey) {
-            document.getElementById('nbPubKey').textContent = data.publicKey.substring(0, 20) + '...';
+            document.getElementById('whPubKey').textContent = data.publicKey.substring(0, 20) + '...';
         }
         if (data.fqdn) {
-            document.getElementById('nbFqdn').textContent = data.fqdn;
+            document.getElementById('whFqdn').textContent = data.fqdn;
         }
 
     } catch (error) {
-        console.error('Error fetching Netbird status:', error);
-        const statusEl = document.getElementById('netbirdStatus');
+        console.error('Error fetching WARHAMMER status:', error);
+        const statusEl = document.getElementById('warhammerStatus');
         statusEl.textContent = 'ERROR';
-        statusEl.className = 'netbird-status disconnected';
+        statusEl.className = 'warhammer-status disconnected';
     }
 }
 
 async function fetchPeers() {
     try {
-        const response = await fetch('/api/netbird/peers');
+        const response = await fetch('/api/warhammer/peers');
         const peers = await response.json();
 
         if (peers.error) {
@@ -260,74 +273,143 @@ async function fetchPeers() {
             return;
         }
 
-        const container = document.getElementById('peerList');
-        container.innerHTML = '';
+        allPeers = peers;
+        renderPeers(peers);
 
-        document.getElementById('peerCount').textContent = peers.length;
-        document.getElementById('peerCounter').textContent = peers.length;
+        // Update map markers
+        if (map) {
+            updateMapMarkers(peers);
+        }
 
-        peers.forEach(peer => {
-            const isOnline = peer.connected || peer.status === 'connected';
-            const div = document.createElement('div');
-            div.className = `peer-item ${isOnline ? 'online' : 'offline'}`;
-            div.onclick = () => showPeerDetails(peer);
-
-            div.innerHTML = `
-                <div class="peer-status-dot"></div>
-                <div class="peer-info">
-                    <div class="peer-name">${peer.name || peer.hostname || 'Unknown'}</div>
-                    <div class="peer-ip">${peer.ip || peer.ipAddress || '--'}</div>
-                </div>
-                ${peer.latency ? `<div class="peer-latency ${getLatencyClass(peer.latency)}">${peer.latency}ms</div>` : ''}
-            `;
-
-            container.appendChild(div);
-
-            // Update map marker if map exists
-            if (map && peer.geoNameId) {
-                updatePeerMarker(peer);
-            }
-        });
-
-        // Update latency chart with online peers
-        updateLatencyChart(peers.filter(p => p.connected));
+        // Auto ping connected peers for latency
+        const connectedPeers = peers.filter(p => p.connected);
+        if (connectedPeers.length > 0 && connectedPeers.length <= 5) {
+            // Only auto-ping if 5 or fewer peers
+            pingAllPeers();
+        }
 
     } catch (error) {
         console.error('Error fetching peers:', error);
     }
 }
 
+function renderPeers(peers) {
+    const container = document.getElementById('peerList');
+    container.innerHTML = '';
+
+    // Sort peers: connected first (alphabetically), then disconnected (alphabetically)
+    const sortedPeers = [...peers].sort((a, b) => {
+        const aConnected = a.connected ? 1 : 0;
+        const bConnected = b.connected ? 1 : 0;
+
+        if (aConnected !== bConnected) {
+            return bConnected - aConnected; // Connected first
+        }
+
+        // Then alphabetically by name
+        const aName = (a.name || a.hostname || '').toLowerCase();
+        const bName = (b.name || b.hostname || '').toLowerCase();
+        return aName.localeCompare(bName);
+    });
+
+    const connectedCount = sortedPeers.filter(p => p.connected).length;
+    document.getElementById('peerCount').textContent = connectedCount;
+    document.getElementById('peerCounter').textContent = sortedPeers.length;
+
+    sortedPeers.forEach(peer => {
+        const isOnline = peer.connected;
+        const div = document.createElement('div');
+        div.className = `peer-item ${isOnline ? 'online' : 'offline'}`;
+        div.onclick = () => showPeerDetails(peer);
+        div.setAttribute('data-peer-name', (peer.name || peer.hostname || '').toLowerCase());
+        div.setAttribute('data-peer-ip', peer.ip || '');
+
+        const latencyHtml = peer.latency
+            ? `<div class="peer-latency ${getLatencyClass(peer.latency)}">${peer.latency.toFixed(1)}ms</div>`
+            : '';
+
+        div.innerHTML = `
+            <div class="peer-status-dot"></div>
+            <div class="peer-info">
+                <div class="peer-name">${peer.name || peer.hostname || 'Unknown'}</div>
+                <div class="peer-ip">${peer.ip || '--'}</div>
+            </div>
+            ${latencyHtml}
+        `;
+
+        container.appendChild(div);
+    });
+
+    // Update latency chart
+    updateLatencyChart(sortedPeers.filter(p => p.connected && p.latency));
+}
+
 async function fetchRoutes() {
     try {
-        const response = await fetch('/api/netbird/routes');
+        const response = await fetch('/api/warhammer/routes');
         const routes = await response.json();
 
         if (routes.error) {
             return;
         }
 
-        const container = document.getElementById('routeList');
-        container.innerHTML = '';
-
-        document.getElementById('routeCounter').textContent = routes.length;
-
-        routes.forEach(route => {
-            const div = document.createElement('div');
-            div.className = 'route-item';
-            div.innerHTML = `
-                <div>
-                    <div class="route-network">${route.network || route.networkRange}</div>
-                    <div class="route-via">via ${route.peer || route.description || 'Direct'}</div>
-                </div>
-                <span class="route-status ${route.enabled ? 'enabled' : 'disabled'}">
-                    ${route.enabled ? 'ENABLED' : 'DISABLED'}
-                </span>
-            `;
-            container.appendChild(div);
-        });
+        allRoutes = routes;
+        renderRoutes(routes);
 
     } catch (error) {
         console.error('Error fetching routes:', error);
+    }
+}
+
+function renderRoutes(routes) {
+    const container = document.getElementById('routeList');
+    container.innerHTML = '';
+
+    document.getElementById('routeCounter').textContent = routes.length;
+
+    routes.forEach(route => {
+        const div = document.createElement('div');
+        div.className = 'route-item';
+
+        const isPersistent = route.persistent;
+        const canModify = !isPersistent;
+
+        div.innerHTML = `
+            <div class="route-info">
+                <div class="route-network">${route.network || route.networkRange || route.network_id}</div>
+                <div class="route-via">${route.description || 'No description'}${isPersistent ? ' (Persistent)' : ''}</div>
+            </div>
+            <div class="route-actions">
+                ${canModify ? `
+                    <button class="btn btn-sm ${route.enabled ? 'btn-success' : 'btn-secondary'}"
+                            onclick="toggleRoute('${route.id}', ${!route.enabled}); event.stopPropagation();">
+                        ${route.enabled ? 'ON' : 'OFF'}
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteRoute('${route.id}'); event.stopPropagation();">
+                        &#10005;
+                    </button>
+                ` : `
+                    <span class="route-status ${route.enabled ? 'enabled' : 'disabled'}">
+                        ${route.enabled ? 'ACTIVE' : 'INACTIVE'}
+                    </span>
+                    <span class="route-locked">&#128274;</span>
+                `}
+            </div>
+        `;
+        container.appendChild(div);
+    });
+}
+
+async function fetchGroups() {
+    try {
+        const response = await fetch('/api/warhammer/groups');
+        const groups = await response.json();
+
+        if (!groups.error) {
+            allGroups = groups;
+        }
+    } catch (error) {
+        console.error('Error fetching groups:', error);
     }
 }
 
@@ -403,53 +485,31 @@ function initNetworkChart() {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            animation: {
-                duration: 300
-            },
+            animation: { duration: 300 },
             plugins: {
-                legend: {
-                    display: false
-                },
+                legend: { display: false },
                 tooltip: {
                     mode: 'index',
                     intersect: false,
                     backgroundColor: 'rgba(18, 14, 12, 0.95)',
                     titleColor: '#ff6b35',
                     bodyColor: '#e8e0d8',
-                    borderColor: 'rgba(255, 107, 53, 0.3)',
-                    borderWidth: 1,
                     callbacks: {
-                        label: function(context) {
-                            return context.dataset.label + ': ' + formatBytes(context.raw) + '/s';
-                        }
+                        label: (context) => context.dataset.label + ': ' + formatBytes(context.raw) + '/s'
                     }
                 }
             },
             scales: {
-                x: {
-                    display: false
-                },
+                x: { display: false },
                 y: {
                     display: true,
-                    grid: {
-                        color: 'rgba(255, 107, 53, 0.1)'
-                    },
+                    grid: { color: 'rgba(255, 107, 53, 0.1)' },
                     ticks: {
                         color: '#584838',
-                        font: {
-                            family: 'Share Tech Mono',
-                            size: 10
-                        },
-                        callback: function(value) {
-                            return formatBytes(value);
-                        }
+                        font: { family: 'Share Tech Mono', size: 10 },
+                        callback: (value) => formatBytes(value)
                     }
                 }
-            },
-            interaction: {
-                mode: 'nearest',
-                axis: 'x',
-                intersect: false
             }
         }
     });
@@ -463,7 +523,6 @@ function updateNetworkChart(rx, tx) {
     chartData.rx.push(rx);
     chartData.tx.push(tx);
 
-    // Keep only last N points
     if (chartData.labels.length > MAX_CHART_POINTS) {
         chartData.labels.shift();
         chartData.rx.shift();
@@ -485,13 +544,13 @@ function initLatencyChart() {
             labels: [],
             datasets: [{
                 data: [],
-                backgroundColor: function(context) {
+                backgroundColor: (context) => {
                     const value = context.raw;
                     if (value < 50) return 'rgba(48, 209, 88, 0.7)';
                     if (value < 100) return 'rgba(255, 176, 0, 0.7)';
                     return 'rgba(255, 59, 48, 0.7)';
                 },
-                borderColor: function(context) {
+                borderColor: (context) => {
                     const value = context.raw;
                     if (value < 50) return '#30d158';
                     if (value < 100) return '#ffb000';
@@ -503,51 +562,33 @@ function initLatencyChart() {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            animation: {
-                duration: 300
-            },
+            animation: { duration: 300 },
             plugins: {
-                legend: {
-                    display: false
-                },
+                legend: { display: false },
                 tooltip: {
                     backgroundColor: 'rgba(18, 14, 12, 0.95)',
                     titleColor: '#ff6b35',
                     bodyColor: '#e8e0d8',
                     callbacks: {
-                        label: function(context) {
-                            return context.raw + ' ms';
-                        }
+                        label: (context) => context.raw.toFixed(1) + ' ms'
                     }
                 }
             },
             scales: {
                 x: {
-                    grid: {
-                        display: false
-                    },
+                    grid: { display: false },
                     ticks: {
                         color: '#584838',
-                        font: {
-                            family: 'Share Tech Mono',
-                            size: 9
-                        },
+                        font: { family: 'Share Tech Mono', size: 9 },
                         maxRotation: 45
                     }
                 },
                 y: {
-                    grid: {
-                        color: 'rgba(255, 107, 53, 0.1)'
-                    },
+                    grid: { color: 'rgba(255, 107, 53, 0.1)' },
                     ticks: {
                         color: '#584838',
-                        font: {
-                            family: 'Share Tech Mono',
-                            size: 10
-                        },
-                        callback: function(value) {
-                            return value + 'ms';
-                        }
+                        font: { family: 'Share Tech Mono', size: 10 },
+                        callback: (value) => value + 'ms'
                     }
                 }
             }
@@ -559,9 +600,11 @@ function updateLatencyChart(peers) {
     const labels = [];
     const data = [];
 
-    peers.slice(0, 8).forEach(peer => {
+    peers.slice(0, 10).forEach(peer => {
         if (peer.latency) {
-            labels.push(peer.name || peer.hostname || peer.ip);
+            const name = peer.name || peer.hostname || peer.ip;
+            // Truncate long names
+            labels.push(name.length > 12 ? name.substring(0, 10) + '..' : name);
             data.push(peer.latency);
         }
     });
@@ -579,8 +622,9 @@ function initMap(token) {
     map = new mapboxgl.Map({
         container: 'mapContainer',
         style: 'mapbox://styles/mapbox/dark-v11',
-        center: [-98.5795, 39.8283], // Center of US
-        zoom: 3
+        center: [-98.5795, 39.8283],
+        zoom: 3,
+        attributionControl: false
     });
 
     map.addControl(new mapboxgl.NavigationControl(), 'top-right');
@@ -590,9 +634,75 @@ function initMap(token) {
     });
 }
 
-function updatePeerMarker(peer) {
-    // This would require geocoding or stored coordinates
-    // Placeholder for map marker functionality
+function updateMapMarkers(peers) {
+    // Remove old markers
+    Object.values(peerMarkers).forEach(marker => marker.remove());
+    peerMarkers = {};
+
+    const bounds = new mapboxgl.LngLatBounds();
+    let hasValidCoords = false;
+
+    peers.forEach(peer => {
+        // Check for GPS coordinates - try multiple possible field names
+        let lat = peer.location?.latitude || peer.geoLocation?.latitude || peer.latitude;
+        let lng = peer.location?.longitude || peer.geoLocation?.longitude || peer.longitude;
+
+        // Also check city_name with country for geocoding hint
+        if (!lat && !lng && peer.city_name && peer.country_code) {
+            // Could implement geocoding here if needed
+            return;
+        }
+
+        if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+            hasValidCoords = true;
+            const isOnline = peer.connected;
+
+            // Create custom marker element
+            const el = document.createElement('div');
+            el.className = `map-marker ${isOnline ? 'online' : 'offline'}`;
+            el.innerHTML = `
+                <div class="marker-dot"></div>
+                <div class="marker-pulse"></div>
+            `;
+            el.title = peer.name || peer.hostname || peer.ip;
+
+            // Create popup
+            const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
+                <div class="map-popup">
+                    <strong>${peer.name || peer.hostname || 'Unknown'}</strong>
+                    <div>${peer.ip || '--'}</div>
+                    <div class="popup-status ${isOnline ? 'online' : 'offline'}">
+                        ${isOnline ? 'ONLINE' : 'OFFLINE'}
+                    </div>
+                    ${peer.latency ? `<div class="popup-latency">${peer.latency.toFixed(1)}ms</div>` : ''}
+                </div>
+            `);
+
+            const marker = new mapboxgl.Marker(el)
+                .setLngLat([lng, lat])
+                .setPopup(popup)
+                .addTo(map);
+
+            peerMarkers[peer.id || peer.ip] = marker;
+            bounds.extend([lng, lat]);
+        }
+    });
+
+    // Fit map to bounds if we have markers
+    if (hasValidCoords && Object.keys(peerMarkers).length > 0) {
+        // Don't auto-fit, let user control the view
+    }
+}
+
+function fitMapToPeers() {
+    if (!map || Object.keys(peerMarkers).length === 0) return;
+
+    const bounds = new mapboxgl.LngLatBounds();
+    Object.values(peerMarkers).forEach(marker => {
+        bounds.extend(marker.getLngLat());
+    });
+
+    map.fitBounds(bounds, { padding: 50, maxZoom: 10 });
 }
 
 function centerMap() {
@@ -605,17 +715,273 @@ function centerMap() {
     }
 }
 
+// ==================== PING ====================
+
+async function pingAllPeers() {
+    const connectedPeers = allPeers.filter(p => p.connected && p.ip);
+
+    if (connectedPeers.length === 0) {
+        addLog('WARN', 'No connected peers to ping');
+        return;
+    }
+
+    addLog('INFO', `Pinging ${connectedPeers.length} peers...`);
+
+    for (const peer of connectedPeers) {
+        try {
+            const response = await fetch(`/api/ping/${peer.ip}`);
+            const data = await response.json();
+
+            if (data.latency) {
+                // Update peer in allPeers array
+                const idx = allPeers.findIndex(p => p.ip === peer.ip);
+                if (idx !== -1) {
+                    allPeers[idx].latency = data.latency;
+                }
+            }
+        } catch (error) {
+            console.error(`Ping failed for ${peer.ip}:`, error);
+        }
+    }
+
+    // Re-render peers with updated latency
+    renderPeers(allPeers);
+    addLog('SUCCESS', 'Ping sweep completed');
+}
+
+async function pingPeer(ip) {
+    if (!ip) return;
+
+    addLog('INFO', `Pinging ${ip}...`);
+
+    try {
+        const response = await fetch(`/api/ping/${ip}`);
+        const data = await response.json();
+
+        if (data.status === 'online') {
+            addLog('SUCCESS', `Ping to ${ip}: ${data.latency.toFixed(1)}ms`);
+
+            // Update peer latency
+            const idx = allPeers.findIndex(p => p.ip === ip);
+            if (idx !== -1) {
+                allPeers[idx].latency = data.latency;
+                renderPeers(allPeers);
+            }
+        } else {
+            addLog('WARN', `Ping to ${ip}: ${data.status}`);
+        }
+    } catch (error) {
+        addLog('ERROR', `Ping failed: ${error.message}`);
+    }
+}
+
+// ==================== ROUTES ====================
+
+function openAddRouteModal() {
+    // Populate peer dropdown
+    const select = document.getElementById('routePeer');
+    select.innerHTML = '<option value="">-- Select Peer --</option>';
+
+    allPeers.filter(p => p.connected).forEach(peer => {
+        const option = document.createElement('option');
+        option.value = peer.id;
+        option.textContent = peer.name || peer.hostname || peer.ip;
+        select.appendChild(option);
+    });
+
+    document.getElementById('addRouteModal').classList.remove('hidden');
+}
+
+function closeAddRouteModal() {
+    document.getElementById('addRouteModal').classList.add('hidden');
+}
+
+async function submitAddRoute() {
+    const network = document.getElementById('routeNetwork').value.trim();
+    const description = document.getElementById('routeDescription').value.trim();
+    const peerId = document.getElementById('routePeer').value;
+    const metric = parseInt(document.getElementById('routeMetric').value) || 9999;
+    const masquerade = document.getElementById('routeMasquerade').checked;
+    const enabled = document.getElementById('routeEnabled').checked;
+
+    if (!network) {
+        addLog('ERROR', 'Network CIDR is required');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/warhammer/routes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                network,
+                description,
+                peer: peerId,
+                metric,
+                masquerade,
+                enabled
+            })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            addLog('SUCCESS', `Route ${network} added`);
+            closeAddRouteModal();
+            fetchRoutes();
+        } else {
+            addLog('ERROR', data.error || 'Failed to add route');
+        }
+    } catch (error) {
+        addLog('ERROR', `Add route failed: ${error.message}`);
+    }
+}
+
+async function toggleRoute(routeId, enabled) {
+    try {
+        const route = allRoutes.find(r => r.id === routeId);
+        if (!route) return;
+
+        const response = await fetch(`/api/warhammer/routes/${routeId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...route, enabled })
+        });
+
+        if (response.ok) {
+            addLog('SUCCESS', `Route ${enabled ? 'enabled' : 'disabled'}`);
+            fetchRoutes();
+        } else {
+            const data = await response.json();
+            addLog('ERROR', data.error || 'Failed to toggle route');
+        }
+    } catch (error) {
+        addLog('ERROR', `Toggle route failed: ${error.message}`);
+    }
+}
+
+async function deleteRoute(routeId) {
+    showConfirm('DELETE ROUTE', 'Are you sure you want to delete this route?', async () => {
+        try {
+            const response = await fetch(`/api/warhammer/routes/${routeId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                addLog('SUCCESS', 'Route deleted');
+                fetchRoutes();
+            } else {
+                const data = await response.json();
+                addLog('ERROR', data.error || 'Failed to delete route');
+            }
+        } catch (error) {
+            addLog('ERROR', `Delete route failed: ${error.message}`);
+        }
+    });
+}
+
+// ==================== INTERFACE CONFIG ====================
+
+function openInterfaceConfig(iface) {
+    const modal = document.getElementById('interfaceModal');
+    const content = document.getElementById('interfaceModalContent');
+
+    const ipList = iface.addresses
+        .filter(a => a.type === 'ipv4')
+        .map(a => `
+            <div class="ip-item">
+                <span>${a.address}</span>
+                <button class="btn btn-sm btn-danger" onclick="removeInterfaceIP('${iface.name}', '${a.address}')">&#10005;</button>
+            </div>
+        `).join('') || '<div class="ip-item">No IPv4 addresses</div>';
+
+    content.innerHTML = `
+        <div class="interface-config">
+            <h3>${iface.name}</h3>
+            <div class="info-row">
+                <span class="info-label">Status:</span>
+                <span class="info-value ${iface.is_up ? 'online' : 'offline'}">${iface.is_up ? 'UP' : 'DOWN'}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Speed:</span>
+                <span class="info-value">${iface.speed || 'Unknown'} Mbps</span>
+            </div>
+
+            <h4>IP Addresses</h4>
+            <div class="ip-list">${ipList}</div>
+
+            <div class="add-ip-form">
+                <input type="text" id="newIP" class="input" placeholder="192.168.1.100">
+                <button class="btn btn-primary btn-sm" onclick="addInterfaceIP('${iface.name}')">ADD IP</button>
+            </div>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
+}
+
+function closeInterfaceModal() {
+    document.getElementById('interfaceModal').classList.add('hidden');
+}
+
+async function addInterfaceIP(iface) {
+    const ip = document.getElementById('newIP').value.trim();
+    if (!ip) return;
+
+    try {
+        const response = await fetch(`/api/interface/${iface}/ip`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            addLog('SUCCESS', `Added IP ${ip} to ${iface}`);
+            closeInterfaceModal();
+            fetchNetworkInterfaces();
+        } else {
+            addLog('ERROR', data.error || 'Failed to add IP');
+        }
+    } catch (error) {
+        addLog('ERROR', `Add IP failed: ${error.message}`);
+    }
+}
+
+async function removeInterfaceIP(iface, ip) {
+    showConfirm('REMOVE IP', `Remove ${ip} from ${iface}?`, async () => {
+        try {
+            const response = await fetch(`/api/interface/${iface}/ip`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ip })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                addLog('SUCCESS', `Removed IP ${ip} from ${iface}`);
+                closeInterfaceModal();
+                fetchNetworkInterfaces();
+            } else {
+                addLog('ERROR', data.error || 'Failed to remove IP');
+            }
+        } catch (error) {
+            addLog('ERROR', `Remove IP failed: ${error.message}`);
+        }
+    });
+}
+
 // ==================== GAUGES ====================
 
 function updateGauge(type, percent) {
     const fill = document.getElementById(`${type}GaugeFill`);
     const value = document.getElementById(`${type}GaugeValue`);
 
-    // Calculate stroke-dashoffset (283 is circumference of circle with r=45)
     const offset = 283 - (283 * percent / 100);
     fill.style.strokeDashoffset = offset;
 
-    // Update color based on value
     fill.classList.remove('warning', 'danger');
     if (percent > 80) {
         fill.classList.add('danger');
@@ -628,9 +994,11 @@ function updateGauge(type, percent) {
 
 // ==================== UI INTERACTIONS ====================
 
-function toggleSection(header) {
-    const section = header.parentElement;
-    section.classList.toggle('collapsed');
+function toggleSection(sectionId) {
+    const section = document.getElementById(sectionId);
+    if (section) {
+        section.classList.toggle('collapsed');
+    }
 }
 
 function filterPeers() {
@@ -638,8 +1006,8 @@ function filterPeers() {
     const items = document.querySelectorAll('.peer-item');
 
     items.forEach(item => {
-        const name = item.querySelector('.peer-name').textContent.toLowerCase();
-        const ip = item.querySelector('.peer-ip').textContent.toLowerCase();
+        const name = item.getAttribute('data-peer-name') || '';
+        const ip = item.getAttribute('data-peer-ip') || '';
 
         if (name.includes(search) || ip.includes(search)) {
             item.style.display = '';
@@ -666,11 +1034,11 @@ function showPeerDetails(peer) {
             </div>
             <div class="info-row">
                 <span class="info-label">IP Address:</span>
-                <span class="info-value">${peer.ip || peer.ipAddress || '--'}</span>
+                <span class="info-value">${peer.ip || '--'}</span>
             </div>
             <div class="info-row">
                 <span class="info-label">Status:</span>
-                <span class="info-value">${peer.connected ? 'Connected' : 'Disconnected'}</span>
+                <span class="info-value ${peer.connected ? 'online' : 'offline'}">${peer.connected ? 'Connected' : 'Disconnected'}</span>
             </div>
             <div class="info-row">
                 <span class="info-label">OS:</span>
@@ -684,15 +1052,27 @@ function showPeerDetails(peer) {
                 <span class="info-label">Last Seen:</span>
                 <span class="info-value">${peer.lastSeen ? new Date(peer.lastSeen).toLocaleString() : '--'}</span>
             </div>
+            ${peer.latency ? `
+            <div class="info-row">
+                <span class="info-label">Latency:</span>
+                <span class="info-value ${getLatencyClass(peer.latency)}">${peer.latency.toFixed(1)} ms</span>
+            </div>
+            ` : ''}
             ${peer.groups ? `
             <div class="info-row">
                 <span class="info-label">Groups:</span>
                 <span class="info-value">${peer.groups.map(g => g.name || g).join(', ')}</span>
             </div>
             ` : ''}
+            ${peer.city_name ? `
+            <div class="info-row">
+                <span class="info-label">Location:</span>
+                <span class="info-value">${peer.city_name}${peer.country_code ? ', ' + peer.country_code : ''}</span>
+            </div>
+            ` : ''}
         </div>
         <div class="btn-group" style="margin-top: 15px;">
-            <button class="btn btn-primary" onclick="pingPeer('${peer.ip || peer.ipAddress}')">PING</button>
+            <button class="btn btn-primary" onclick="pingPeer('${peer.ip}')">PING</button>
             <button class="btn btn-secondary" onclick="closePeerModal()">CLOSE</button>
         </div>
     `;
@@ -702,25 +1082,6 @@ function showPeerDetails(peer) {
 
 function closePeerModal() {
     document.getElementById('peerModal').classList.add('hidden');
-}
-
-async function pingPeer(ip) {
-    if (!ip) return;
-
-    addLog('INFO', `Pinging ${ip}...`);
-
-    try {
-        const response = await fetch(`/api/ping/${ip}`);
-        const data = await response.json();
-
-        if (data.status === 'online') {
-            addLog('SUCCESS', `Ping to ${ip}: ${data.latency}ms`);
-        } else {
-            addLog('WARN', `Ping to ${ip}: ${data.status}`);
-        }
-    } catch (error) {
-        addLog('ERROR', `Ping failed: ${error.message}`);
-    }
 }
 
 // ==================== SETTINGS ====================
@@ -734,15 +1095,9 @@ function closeSettingsModal() {
 }
 
 function showSettingsTab(tab) {
-    // Hide all tabs
-    document.querySelectorAll('.settings-content').forEach(el => {
-        el.classList.remove('active');
-    });
-    document.querySelectorAll('.settings-tab').forEach(el => {
-        el.classList.remove('active');
-    });
+    document.querySelectorAll('.settings-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.settings-tab').forEach(el => el.classList.remove('active'));
 
-    // Show selected tab
     document.getElementById(`settings${tab.charAt(0).toUpperCase() + tab.slice(1)}`).classList.add('active');
     event.target.classList.add('active');
 }
@@ -815,11 +1170,12 @@ function addLog(level, message) {
     container.appendChild(entry);
     container.scrollTop = container.scrollHeight;
 
-    // Keep only last 100 logs
     logs.push({ time: timeStr, level, message });
     if (logs.length > 100) {
         logs.shift();
-        container.removeChild(container.firstChild);
+        if (container.firstChild) {
+            container.removeChild(container.firstChild);
+        }
     }
 }
 
@@ -848,14 +1204,12 @@ function getLatencyClass(latency) {
 // ==================== KEYBOARD SHORTCUTS ====================
 
 document.addEventListener('keydown', (e) => {
-    // ESC to close modals
     if (e.key === 'Escape') {
         document.querySelectorAll('.modal:not(.hidden)').forEach(modal => {
             modal.classList.add('hidden');
         });
     }
 
-    // Ctrl+R to refresh peers
     if (e.ctrlKey && e.key === 'r') {
         e.preventDefault();
         refreshPeers();
@@ -865,13 +1219,6 @@ document.addEventListener('keydown', (e) => {
 // ==================== CLEANUP ====================
 
 window.addEventListener('beforeunload', () => {
-    // Clear intervals
-    Object.values(refreshIntervals).forEach(interval => {
-        clearInterval(interval);
-    });
-
-    // Disconnect socket
-    if (socket) {
-        socket.disconnect();
-    }
+    Object.values(refreshIntervals).forEach(interval => clearInterval(interval));
+    if (socket) socket.disconnect();
 });

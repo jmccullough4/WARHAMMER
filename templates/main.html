@@ -11,6 +11,9 @@
     {% if mapbox_token %}
     <script src="https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.js"></script>
     <link href="https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.css" rel="stylesheet">
+    <style>
+        .mapboxgl-ctrl-logo, .mapboxgl-ctrl-attrib { display: none !important; }
+    </style>
     {% endif %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
 </head>
@@ -72,7 +75,7 @@
         <!-- Operations Bar -->
         <div class="operations-bar">
             <span class="ops-label">NETWORK:</span>
-            <span class="ops-domain" id="netbirdDomain">{{ netbird_domain }}</span>
+            <span class="ops-domain" id="warhammerDomain">{{ warhammer_domain }}</span>
             <span class="ops-separator">|</span>
             <span class="ops-label">IP:</span>
             <span class="ops-ip" id="managementIP">{{ management_ip }}</span>
@@ -86,8 +89,8 @@
             <!-- Left Panel - Network Status -->
             <div class="panel panel-left">
                 <!-- System Status Section -->
-                <div class="panel-section">
-                    <div class="section-header collapsible" onclick="toggleSection(this)">
+                <div class="panel-section" id="systemStatusSection">
+                    <div class="section-header collapsible" onclick="toggleSection('systemStatusSection')">
                         <span class="section-icon">&#128187;</span>
                         <span>SYSTEM STATUS</span>
                         <span class="section-toggle">&#9660;</span>
@@ -133,8 +136,8 @@
                 </div>
 
                 <!-- Network Interfaces Section -->
-                <div class="panel-section">
-                    <div class="section-header collapsible" onclick="toggleSection(this)">
+                <div class="panel-section" id="interfacesSection">
+                    <div class="section-header collapsible" onclick="toggleSection('interfacesSection')">
                         <span class="section-icon">&#128268;</span>
                         <span>INTERFACES</span>
                         <span class="interface-count" id="interfaceCount">0</span>
@@ -146,8 +149,8 @@
                 </div>
 
                 <!-- Services Section -->
-                <div class="panel-section">
-                    <div class="section-header collapsible" onclick="toggleSection(this)">
+                <div class="panel-section" id="servicesSection">
+                    <div class="section-header collapsible" onclick="toggleSection('servicesSection')">
                         <span class="section-icon">&#9881;</span>
                         <span>SERVICES</span>
                         <span class="section-toggle">&#9660;</span>
@@ -157,17 +160,17 @@
                     </div>
                 </div>
 
-                <!-- SBC Controls -->
-                <div class="panel-section">
-                    <div class="section-header collapsible" onclick="toggleSection(this)">
-                        <span class="section-icon">&#128268;</span>
-                        <span>SBC CONTROLS</span>
+                <!-- System Controls -->
+                <div class="panel-section" id="sbcSection">
+                    <div class="section-header collapsible" onclick="toggleSection('sbcSection')">
+                        <span class="section-icon">&#9211;</span>
+                        <span>SYSTEM CONTROLS</span>
                         <span class="section-toggle">&#9660;</span>
                     </div>
                     <div class="section-content">
-                        <div class="sbc-info">
-                            <div class="sbc-model">LattePanda Sigma</div>
-                            <div class="sbc-details">Intel i5 | 16GB | NVMe</div>
+                        <div class="sbc-info" id="sbcInfo">
+                            <div class="sbc-model" id="sbcModel">WARHAMMER Node</div>
+                            <div class="sbc-details" id="sbcDetails">Loading...</div>
                         </div>
                         <div class="btn-group">
                             <button class="btn btn-warning btn-sm" onclick="confirmReboot()">
@@ -219,6 +222,7 @@
                 <div class="chart-panel latency-panel">
                     <div class="chart-header">
                         <span class="chart-title">&#128225; PEER LATENCY</span>
+                        <button class="btn btn-sm" onclick="pingAllPeers()">&#8635; PING ALL</button>
                     </div>
                     <div class="chart-container chart-sm">
                         <canvas id="latencyChart"></canvas>
@@ -231,7 +235,8 @@
                     <div class="chart-header">
                         <span class="chart-title">&#127757; PEER LOCATIONS</span>
                         <div class="map-controls">
-                            <button class="btn btn-sm btn-map" onclick="centerMap()">&#8982; CENTER</button>
+                            <button class="btn btn-sm btn-map" onclick="fitMapToPeers()">&#8982; FIT ALL</button>
+                            <button class="btn btn-sm btn-map" onclick="centerMap()">&#127968; CENTER</button>
                         </div>
                     </div>
                     <div class="map-container" id="mapContainer"></div>
@@ -241,36 +246,36 @@
 
             <!-- Right Panel - Peers -->
             <div class="panel panel-right">
-                <!-- Netbird Status -->
-                <div class="panel-section">
+                <!-- WARHAMMER Network Status -->
+                <div class="panel-section" id="networkStatusSection">
                     <div class="section-header">
                         <span class="section-icon">&#128279;</span>
-                        <span>NETBIRD STATUS</span>
-                        <span class="netbird-status" id="netbirdStatus">CHECKING</span>
+                        <span>NETWORK STATUS</span>
+                        <span class="warhammer-status" id="warhammerStatus">CHECKING</span>
                     </div>
                     <div class="section-content">
-                        <div class="netbird-info" id="netbirdInfo">
+                        <div class="warhammer-info" id="warhammerInfo">
                             <div class="info-row">
                                 <span class="info-label">Version:</span>
-                                <span class="info-value" id="nbVersion">--</span>
+                                <span class="info-value" id="whVersion">--</span>
                             </div>
                             <div class="info-row">
                                 <span class="info-label">Public Key:</span>
-                                <span class="info-value truncate" id="nbPubKey">--</span>
+                                <span class="info-value truncate" id="whPubKey">--</span>
                             </div>
                             <div class="info-row">
                                 <span class="info-label">FQDN:</span>
-                                <span class="info-value" id="nbFqdn">--</span>
+                                <span class="info-value" id="whFqdn">--</span>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <!-- Peers List -->
-                <div class="panel-section peers-section">
-                    <div class="section-header collapsible" onclick="toggleSection(this)">
+                <div class="panel-section peers-section" id="peersSection">
+                    <div class="section-header collapsible" onclick="toggleSection('peersSection')">
                         <span class="section-icon">&#128101;</span>
-                        <span>CONNECTED PEERS</span>
+                        <span>NETWORK PEERS</span>
                         <span class="device-counter" id="peerCounter">0</span>
                         <span class="section-toggle">&#9660;</span>
                     </div>
@@ -284,20 +289,25 @@
                 </div>
 
                 <!-- Routes -->
-                <div class="panel-section">
-                    <div class="section-header collapsible" onclick="toggleSection(this)">
+                <div class="panel-section" id="routesSection">
+                    <div class="section-header collapsible" onclick="toggleSection('routesSection')">
                         <span class="section-icon">&#128739;</span>
                         <span>ROUTES</span>
                         <span class="route-counter" id="routeCounter">0</span>
                         <span class="section-toggle">&#9660;</span>
                     </div>
-                    <div class="section-content route-list" id="routeList">
-                        <!-- Routes populated by JS -->
+                    <div class="section-content">
+                        <div class="route-toolbar">
+                            <button class="btn btn-sm btn-primary" onclick="openAddRouteModal()">+ ADD ROUTE</button>
+                        </div>
+                        <div class="route-list" id="routeList">
+                            <!-- Routes populated by JS -->
+                        </div>
                     </div>
                 </div>
 
                 <!-- Activity Log -->
-                <div class="panel-section log-section">
+                <div class="panel-section log-section" id="logSection">
                     <div class="section-header">
                         <span class="section-icon">&#128196;</span>
                         <span>ACTIVITY LOG</span>
@@ -342,10 +352,10 @@
 
                 <div id="settingsNetwork" class="settings-content">
                     <div class="settings-group">
-                        <h3>Netbird Configuration</h3>
+                        <h3>WARHAMMER Network</h3>
                         <div class="setting-row">
                             <label>Domain:</label>
-                            <input type="text" id="settingsNbDomain" class="input" value="{{ netbird_domain }}" readonly>
+                            <input type="text" id="settingsWhDomain" class="input" value="{{ warhammer_domain }}" readonly>
                         </div>
                     </div>
                 </div>
@@ -382,9 +392,9 @@
                             </svg>
                         </div>
                         <h2>WARHAMMER</h2>
-                        <p class="about-version">Version 2.0.0</p>
+                        <p class="about-version">Version 2.1.0</p>
                         <p class="about-desc">Network Overlay Management System</p>
-                        <p class="about-copy">Powered by Netbird &amp; LattePanda Sigma</p>
+                        <p class="about-copy">Secure Tactical Network Infrastructure</p>
                     </div>
                 </div>
             </div>
@@ -420,12 +430,73 @@
         </div>
     </div>
 
+    <!-- Add Route Modal -->
+    <div id="addRouteModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span>&#128739; ADD NETWORK ROUTE</span>
+                <button class="modal-close" onclick="closeAddRouteModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <label>Network CIDR:</label>
+                    <input type="text" id="routeNetwork" placeholder="10.0.0.0/24" class="input">
+                </div>
+                <div class="form-row">
+                    <label>Description:</label>
+                    <input type="text" id="routeDescription" placeholder="Route description" class="input">
+                </div>
+                <div class="form-row">
+                    <label>Peer:</label>
+                    <select id="routePeer" class="input">
+                        <option value="">-- Select Peer --</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>Metric:</label>
+                    <input type="number" id="routeMetric" value="9999" min="0" max="99999" class="input">
+                </div>
+                <div class="form-row">
+                    <label class="toggle">
+                        <input type="checkbox" id="routeMasquerade" checked>
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">Masquerade</span>
+                    </label>
+                </div>
+                <div class="form-row">
+                    <label class="toggle">
+                        <input type="checkbox" id="routeEnabled" checked>
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">Enabled</span>
+                    </label>
+                </div>
+                <div class="btn-group mt-10">
+                    <button class="btn btn-primary" onclick="submitAddRoute()">ADD ROUTE</button>
+                    <button class="btn btn-secondary" onclick="closeAddRouteModal()">CANCEL</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Interface Config Modal -->
+    <div id="interfaceModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span>&#128268; INTERFACE CONFIGURATION</span>
+                <button class="modal-close" onclick="closeInterfaceModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="interfaceModalContent">
+                <!-- Interface config populated by JS -->
+            </div>
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     <script>
         // Initialize with server-provided config
         const CONFIG = {
             mapboxToken: '{{ mapbox_token }}',
-            netbirdDomain: '{{ netbird_domain }}',
+            warhammerDomain: '{{ warhammer_domain }}',
             hostname: '{{ warhammer_name }}'
         };
 

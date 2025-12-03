@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 WARHAMMER - Network Overlay Management System
-A stunning web interface for Netbird overlay network management
-and LattePanda Sigma SBC control.
+A stunning web interface for WARHAMMER network overlay management
+and SBC control.
 """
 
 import os
@@ -14,6 +14,7 @@ import threading
 import requests
 import psutil
 import socket
+import ipaddress
 from datetime import timedelta
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
@@ -30,9 +31,13 @@ WIFI_INTERFACE = os.environ.get('WIFI_INTERFACE', 'wlo1')
 PORT_1_INTERFACE = os.environ.get('PORT_1_INTERFACE', 'enp87s0')
 PORT_2_INTERFACE = os.environ.get('PORT_2_INTERFACE', 'enp86s0')
 BRIDGED_CIDR = os.environ.get('BRIDGED_CIDR', f'{MANAGEMENT_INTERFACE_3}/24')
-NETBIRD_DOMAIN = os.environ.get('NETBIRD_DOMAIN', 'demo.crabsthatgrab.com')
-NETBIRD_TOKEN = os.environ.get('NETBIRD_TOKEN', '')
+WARHAMMER_DOMAIN = os.environ.get('NETBIRD_DOMAIN', 'demo.crabsthatgrab.com')
+WARHAMMER_TOKEN = os.environ.get('NETBIRD_TOKEN', '')
 MAPBOX_TOKEN = os.environ.get('MAPBOX_TOKEN', '')
+BASE_NETPLAN = os.environ.get('BASE_NETPLAN', '/etc/netplan/01-network-manager-all.yaml')
+
+# Interfaces to hide from the UI
+HIDDEN_INTERFACES = ['lo', 'virbr0', 'virbr0-nic', 'docker0']
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'warhammer-secret-key-change-in-production')
@@ -46,15 +51,10 @@ USERS = {
     'operator': 'operator123'
 }
 
-# Network metrics history
-metrics_history = {
-    'timestamps': [],
-    'rx_bytes': [],
-    'tx_bytes': [],
-    'latency': [],
-    'packet_loss': []
-}
-MAX_HISTORY = 60  # Keep 60 data points
+# Cache for peer latency data
+peer_latency_cache = {}
+latency_history = {}  # {peer_ip: [latency_values]}
+MAX_LATENCY_HISTORY = 30
 
 # ==================== AUTHENTICATION ====================
 
@@ -100,10 +100,25 @@ def dashboard():
     return render_template('main.html',
         warhammer_name=WARHAMMER_NAME,
         username=session.get('username', 'operator'),
-        netbird_domain=NETBIRD_DOMAIN,
+        warhammer_domain=WARHAMMER_DOMAIN,
         mapbox_token=MAPBOX_TOKEN,
         management_ip=MANAGEMENT_INTERFACE_1
     )
+
+# ==================== HELPER FUNCTIONS ====================
+
+def get_api_headers():
+    """Get headers for WARHAMMER API calls"""
+    return {
+        'Authorization': f'Token {WARHAMMER_TOKEN}',
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+    }
+
+def is_persistent_route(route):
+    """Check if a route is marked as persistent (cannot be modified)"""
+    description = route.get('description', '') or ''
+    return 'persistent' in description.lower()
 
 # ==================== API ENDPOINTS ====================
 
@@ -130,9 +145,21 @@ def get_system_info():
         uptime_seconds = time.time() - psutil.boot_time()
         uptime_str = str(timedelta(seconds=int(uptime_seconds)))
 
+        # Get CPU info
+        cpu_info = "Unknown"
+        try:
+            with open('/proc/cpuinfo', 'r') as f:
+                for line in f:
+                    if 'model name' in line:
+                        cpu_info = line.split(':')[1].strip()
+                        break
+        except:
+            pass
+
         return jsonify({
             'hostname': WARHAMMER_NAME,
             'cpu_percent': cpu_percent,
+            'cpu_info': cpu_info,
             'memory_percent': memory.percent,
             'memory_used': memory.used,
             'memory_total': memory.total,
@@ -149,7 +176,7 @@ def get_system_info():
 @app.route('/api/network/interfaces')
 @login_required
 def get_network_interfaces():
-    """Get all network interfaces with their status"""
+    """Get all network interfaces with their status (excluding hidden ones)"""
     try:
         interfaces = []
         net_io = psutil.net_io_counters(pernic=True)
@@ -157,7 +184,8 @@ def get_network_interfaces():
         net_if_stats = psutil.net_if_stats()
 
         for iface, addrs in net_if_addrs.items():
-            if iface == 'lo':
+            # Skip hidden interfaces
+            if iface in HIDDEN_INTERFACES:
                 continue
 
             info = {
@@ -168,7 +196,8 @@ def get_network_interfaces():
                 'rx_bytes': 0,
                 'tx_bytes': 0,
                 'rx_packets': 0,
-                'tx_packets': 0
+                'tx_packets': 0,
+                'configurable': iface in [PORT_1_INTERFACE, PORT_2_INTERFACE, BRIDGE_INTERFACE]
             }
 
             for addr in addrs:
@@ -209,8 +238,6 @@ def get_network_metrics():
     """Get real-time network metrics"""
     try:
         net_io = psutil.net_io_counters()
-
-        # Calculate rates if we have previous data
         current_time = time.time()
 
         metrics = {
@@ -229,10 +256,12 @@ def get_network_metrics():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/netbird/status')
+# ==================== WARHAMMER NETWORK API ====================
+
+@app.route('/api/warhammer/status')
 @login_required
-def get_netbird_status():
-    """Get Netbird daemon status"""
+def get_warhammer_status():
+    """Get WARHAMMER network daemon status"""
     try:
         result = subprocess.run(['netbird', 'status', '--json'],
                               capture_output=True, text=True, timeout=10)
@@ -240,35 +269,37 @@ def get_netbird_status():
             status = json.loads(result.stdout)
             return jsonify(status)
         else:
-            return jsonify({'error': 'Netbird not running', 'details': result.stderr}), 503
+            return jsonify({'error': 'WARHAMMER network not running', 'details': result.stderr}), 503
     except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Netbird status timeout'}), 504
+        return jsonify({'error': 'Status check timeout'}), 504
     except FileNotFoundError:
-        return jsonify({'error': 'Netbird not installed'}), 404
+        return jsonify({'error': 'WARHAMMER network not installed'}), 404
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/netbird/peers')
+@app.route('/api/warhammer/peers')
 @login_required
-def get_netbird_peers():
-    """Get Netbird peers from management API"""
+def get_warhammer_peers():
+    """Get WARHAMMER network peers from management API"""
     try:
-        if not NETBIRD_TOKEN:
-            return jsonify({'error': 'Netbird token not configured'}), 400
-
-        headers = {
-            'Authorization': f'Token {NETBIRD_TOKEN}',
-            'Accept': 'application/json'
-        }
+        if not WARHAMMER_TOKEN:
+            return jsonify({'error': 'WARHAMMER token not configured'}), 400
 
         response = requests.get(
-            f'https://{NETBIRD_DOMAIN}/api/peers',
-            headers=headers,
+            f'https://{WARHAMMER_DOMAIN}/api/peers',
+            headers=get_api_headers(),
             timeout=10
         )
 
         if response.status_code == 200:
             peers = response.json()
+            # Enrich peers with latency data from cache
+            for peer in peers:
+                peer_ip = peer.get('ip', '')
+                if peer_ip in peer_latency_cache:
+                    peer['latency'] = peer_latency_cache[peer_ip]
+                if peer_ip in latency_history:
+                    peer['latency_history'] = latency_history[peer_ip]
             return jsonify(peers)
         else:
             return jsonify({'error': f'API error: {response.status_code}'}), response.status_code
@@ -277,49 +308,135 @@ def get_netbird_peers():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/netbird/routes')
+@app.route('/api/warhammer/routes')
 @login_required
-def get_netbird_routes():
-    """Get Netbird routes from management API"""
+def get_warhammer_routes():
+    """Get WARHAMMER network routes from management API"""
     try:
-        if not NETBIRD_TOKEN:
-            return jsonify({'error': 'Netbird token not configured'}), 400
-
-        headers = {
-            'Authorization': f'Token {NETBIRD_TOKEN}',
-            'Accept': 'application/json'
-        }
+        if not WARHAMMER_TOKEN:
+            return jsonify({'error': 'WARHAMMER token not configured'}), 400
 
         response = requests.get(
-            f'https://{NETBIRD_DOMAIN}/api/routes',
-            headers=headers,
+            f'https://{WARHAMMER_DOMAIN}/api/routes',
+            headers=get_api_headers(),
             timeout=10
         )
 
         if response.status_code == 200:
             routes = response.json()
+            # Add persistent flag to routes
+            for route in routes:
+                route['persistent'] = is_persistent_route(route)
             return jsonify(routes)
         else:
             return jsonify({'error': f'API error: {response.status_code}'}), response.status_code
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/netbird/groups')
+@app.route('/api/warhammer/routes', methods=['POST'])
 @login_required
-def get_netbird_groups():
-    """Get Netbird groups from management API"""
+def create_warhammer_route():
+    """Create a new WARHAMMER network route"""
     try:
-        if not NETBIRD_TOKEN:
-            return jsonify({'error': 'Netbird token not configured'}), 400
+        if not WARHAMMER_TOKEN:
+            return jsonify({'error': 'WARHAMMER token not configured'}), 400
 
-        headers = {
-            'Authorization': f'Token {NETBIRD_TOKEN}',
-            'Accept': 'application/json'
-        }
+        data = request.json
+
+        response = requests.post(
+            f'https://{WARHAMMER_DOMAIN}/api/routes',
+            headers=get_api_headers(),
+            json=data,
+            timeout=10
+        )
+
+        if response.status_code in [200, 201]:
+            return jsonify(response.json())
+        else:
+            return jsonify({'error': f'API error: {response.status_code}', 'details': response.text}), response.status_code
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/warhammer/routes/<route_id>', methods=['PUT'])
+@login_required
+def update_warhammer_route(route_id):
+    """Update a WARHAMMER network route (enable/disable)"""
+    try:
+        if not WARHAMMER_TOKEN:
+            return jsonify({'error': 'WARHAMMER token not configured'}), 400
+
+        # First get the route to check if it's persistent
+        get_response = requests.get(
+            f'https://{WARHAMMER_DOMAIN}/api/routes/{route_id}',
+            headers=get_api_headers(),
+            timeout=10
+        )
+
+        if get_response.status_code == 200:
+            existing_route = get_response.json()
+            if is_persistent_route(existing_route):
+                return jsonify({'error': 'Cannot modify persistent route'}), 403
+
+        data = request.json
+
+        response = requests.put(
+            f'https://{WARHAMMER_DOMAIN}/api/routes/{route_id}',
+            headers=get_api_headers(),
+            json=data,
+            timeout=10
+        )
+
+        if response.status_code == 200:
+            return jsonify(response.json())
+        else:
+            return jsonify({'error': f'API error: {response.status_code}'}), response.status_code
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/warhammer/routes/<route_id>', methods=['DELETE'])
+@login_required
+def delete_warhammer_route(route_id):
+    """Delete a WARHAMMER network route"""
+    try:
+        if not WARHAMMER_TOKEN:
+            return jsonify({'error': 'WARHAMMER token not configured'}), 400
+
+        # First get the route to check if it's persistent
+        get_response = requests.get(
+            f'https://{WARHAMMER_DOMAIN}/api/routes/{route_id}',
+            headers=get_api_headers(),
+            timeout=10
+        )
+
+        if get_response.status_code == 200:
+            existing_route = get_response.json()
+            if is_persistent_route(existing_route):
+                return jsonify({'error': 'Cannot delete persistent route'}), 403
+
+        response = requests.delete(
+            f'https://{WARHAMMER_DOMAIN}/api/routes/{route_id}',
+            headers=get_api_headers(),
+            timeout=10
+        )
+
+        if response.status_code in [200, 204]:
+            return jsonify({'message': 'Route deleted'})
+        else:
+            return jsonify({'error': f'API error: {response.status_code}'}), response.status_code
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/warhammer/groups')
+@login_required
+def get_warhammer_groups():
+    """Get WARHAMMER network groups from management API"""
+    try:
+        if not WARHAMMER_TOKEN:
+            return jsonify({'error': 'WARHAMMER token not configured'}), 400
 
         response = requests.get(
-            f'https://{NETBIRD_DOMAIN}/api/groups',
-            headers=headers,
+            f'https://{WARHAMMER_DOMAIN}/api/groups',
+            headers=get_api_headers(),
             timeout=10
         )
 
@@ -330,6 +447,8 @@ def get_netbird_groups():
             return jsonify({'error': f'API error: {response.status_code}'}), response.status_code
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ==================== PING & LATENCY ====================
 
 @app.route('/api/ping/<target>')
 @login_required
@@ -346,14 +465,23 @@ def ping_target(target):
             lines = result.stdout.split('\n')
             for line in lines:
                 if 'avg' in line or 'rtt' in line:
-                    # Extract avg value (format: min/avg/max/mdev)
                     parts = line.split('=')
                     if len(parts) > 1:
                         values = parts[1].strip().split('/')
                         if len(values) >= 2:
+                            latency = float(values[1])
+                            # Update cache
+                            peer_latency_cache[target] = latency
+                            # Update history
+                            if target not in latency_history:
+                                latency_history[target] = []
+                            latency_history[target].append(latency)
+                            if len(latency_history[target]) > MAX_LATENCY_HISTORY:
+                                latency_history[target].pop(0)
+
                             return jsonify({
                                 'target': target,
-                                'latency': float(values[1]),
+                                'latency': latency,
                                 'packet_loss': 0,
                                 'status': 'online'
                             })
@@ -364,6 +492,14 @@ def ping_target(target):
         return jsonify({'target': target, 'status': 'timeout', 'packet_loss': 100})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/latency/history')
+@login_required
+def get_latency_history():
+    """Get latency history for all peers"""
+    return jsonify(latency_history)
+
+# ==================== SBC CONTROLS ====================
 
 @app.route('/api/sbc/power', methods=['POST'])
 @login_required
@@ -387,7 +523,15 @@ def sbc_power_control():
 @login_required
 def get_sbc_services():
     """Get status of important system services"""
-    services = ['netbird', 'NetworkManager', 'ssh', 'docker']
+    services = ['wg-quick@wg0', 'NetworkManager', 'ssh', 'docker']
+    # Map internal service names to display names
+    display_names = {
+        'wg-quick@wg0': 'WARHAMMER VPN',
+        'NetworkManager': 'Network Manager',
+        'ssh': 'SSH Server',
+        'docker': 'Docker'
+    }
+
     results = []
 
     for service in services:
@@ -397,14 +541,25 @@ def get_sbc_services():
                 capture_output=True, text=True, timeout=5
             )
             status = result.stdout.strip()
+            # Try netbird if wg-quick not found
+            if service == 'wg-quick@wg0' and status != 'active':
+                result2 = subprocess.run(
+                    ['systemctl', 'is-active', 'netbird'],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result2.stdout.strip() == 'active':
+                    status = 'active'
+
             results.append({
-                'name': service,
+                'name': display_names.get(service, service),
+                'service': service,
                 'status': status,
                 'active': status == 'active'
             })
         except:
             results.append({
-                'name': service,
+                'name': display_names.get(service, service),
+                'service': service,
                 'status': 'unknown',
                 'active': False
             })
@@ -415,7 +570,7 @@ def get_sbc_services():
 @login_required
 def control_service(service, action):
     """Start/stop/restart a service"""
-    allowed_services = ['netbird', 'NetworkManager', 'docker']
+    allowed_services = ['netbird', 'NetworkManager', 'docker', 'wg-quick@wg0']
     allowed_actions = ['start', 'stop', 'restart']
 
     if service not in allowed_services:
@@ -434,6 +589,59 @@ def control_service(service, action):
             'success': result.returncode == 0,
             'message': result.stderr if result.returncode != 0 else 'OK'
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ==================== INTERFACE CONFIGURATION ====================
+
+@app.route('/api/interface/<iface>/ip', methods=['POST'])
+@login_required
+def add_interface_ip(iface):
+    """Add an IP address to an interface"""
+    try:
+        if iface not in [PORT_1_INTERFACE, PORT_2_INTERFACE, BRIDGE_INTERFACE]:
+            return jsonify({'error': 'Interface not configurable'}), 403
+
+        new_ip = request.json.get('ip')
+
+        # Validate IP address
+        try:
+            ipaddress.ip_address(new_ip)
+        except ValueError:
+            return jsonify({'error': 'Invalid IP address'}), 400
+
+        # Add IP using ip command
+        cmd = f'sudo ip addr add {new_ip}/24 dev {iface}'
+        result = subprocess.run(cmd.split(), capture_output=True, text=True)
+
+        if result.returncode == 0:
+            return jsonify({'message': 'IP address added successfully'})
+        else:
+            return jsonify({'error': result.stderr}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/interface/<iface>/ip', methods=['DELETE'])
+@login_required
+def remove_interface_ip(iface):
+    """Remove an IP address from an interface"""
+    try:
+        if iface not in [PORT_1_INTERFACE, PORT_2_INTERFACE, BRIDGE_INTERFACE]:
+            return jsonify({'error': 'Interface not configurable'}), 403
+
+        ip_to_remove = request.json.get('ip')
+
+        # Don't allow removing management IPs
+        if ip_to_remove in [MANAGEMENT_INTERFACE_1, MANAGEMENT_INTERFACE_2, MANAGEMENT_INTERFACE_3]:
+            return jsonify({'error': 'Cannot remove management IP'}), 403
+
+        cmd = f'sudo ip addr del {ip_to_remove}/24 dev {iface}'
+        result = subprocess.run(cmd.split(), capture_output=True, text=True)
+
+        if result.returncode == 0:
+            return jsonify({'message': 'IP address removed successfully'})
+        else:
+            return jsonify({'error': result.stderr}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -498,7 +706,7 @@ if __name__ == '__main__':
     ╠═══════════════════════════════════════════════════════════╣
     ║  Host: {WARHAMMER_NAME:<48} ║
     ║  Port: {port:<48} ║
-    ║  Netbird Domain: {NETBIRD_DOMAIN:<37} ║
+    ║  Network: {WARHAMMER_DOMAIN:<44} ║
     ╚═══════════════════════════════════════════════════════════╝
     """)
 
