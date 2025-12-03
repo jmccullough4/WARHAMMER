@@ -126,11 +126,9 @@ async function fetchSystemInfo() {
 
         // Update CPU
         updateGauge('cpu', data.cpu_percent);
-        document.getElementById('cpuValue').textContent = `${data.cpu_percent.toFixed(1)}%`;
 
         // Update Memory
         updateGauge('mem', data.memory_percent);
-        document.getElementById('memValue').textContent = `${data.memory_percent.toFixed(1)}%`;
 
         // Update Disk
         updateGauge('disk', data.disk_percent);
@@ -490,19 +488,6 @@ function updateMetrics(data) {
     // Update totals
     document.getElementById('totalRx').textContent = formatBytes(data.rx_bytes);
     document.getElementById('totalTx').textContent = formatBytes(data.tx_bytes);
-
-    // Update header values
-    if (data.cpu !== undefined) {
-        const cpuEl = document.getElementById('cpuValue');
-        cpuEl.textContent = `${data.cpu.toFixed(1)}%`;
-        cpuEl.className = 'info-value' + (data.cpu > 80 ? ' danger' : data.cpu > 60 ? ' warning' : '');
-    }
-
-    if (data.memory !== undefined) {
-        const memEl = document.getElementById('memValue');
-        memEl.textContent = `${data.memory.toFixed(1)}%`;
-        memEl.className = 'info-value' + (data.memory > 85 ? ' danger' : data.memory > 70 ? ' warning' : '');
-    }
 
     lastMetrics = data;
 }
