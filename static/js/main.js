@@ -634,10 +634,31 @@ function initMap(token) {
     });
 }
 
+function getNetworkName(peer) {
+    // Get short network name - not FQDN, never show "netbird"
+    let name = peer.name || peer.hostname || '';
+
+    // Remove domain suffix if present
+    if (name.includes('.')) {
+        name = name.split('.')[0];
+    }
+
+    // Never show netbird-related names
+    if (name.toLowerCase().includes('netbird')) {
+        name = peer.ip || 'Unknown';
+    }
+
+    return name || peer.ip || 'Unknown';
+}
+
 function updateMapMarkers(peers) {
-    // Remove old markers
-    Object.values(peerMarkers).forEach(marker => marker.remove());
-    peerMarkers = {};
+    // Remove old peer markers (keep local node)
+    Object.keys(peerMarkers).forEach(key => {
+        if (key !== 'local-node') {
+            peerMarkers[key].remove();
+            delete peerMarkers[key];
+        }
+    });
 
     const bounds = new mapboxgl.LngLatBounds();
     let hasValidCoords = false;
@@ -656,6 +677,7 @@ function updateMapMarkers(peers) {
         if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
             hasValidCoords = true;
             const isOnline = peer.connected;
+            const networkName = getNetworkName(peer);
 
             // Create custom marker element
             const el = document.createElement('div');
@@ -663,13 +685,14 @@ function updateMapMarkers(peers) {
             el.innerHTML = `
                 <div class="marker-dot"></div>
                 <div class="marker-pulse"></div>
+                <div class="marker-label">${networkName}</div>
             `;
-            el.title = peer.name || peer.hostname || peer.ip;
+            el.title = networkName;
 
             // Create popup
             const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
                 <div class="map-popup">
-                    <strong>${peer.name || peer.hostname || 'Unknown'}</strong>
+                    <strong>${networkName}</strong>
                     <div>${peer.ip || '--'}</div>
                     <div class="popup-status ${isOnline ? 'online' : 'offline'}">
                         ${isOnline ? 'ONLINE' : 'OFFLINE'}
@@ -1219,6 +1242,7 @@ document.addEventListener('keydown', (e) => {
 // ==================== SYSTEM UPGRADE ====================
 
 let upgradePollingInterval = null;
+let currentUpgradeType = null;
 
 function openUpgradeModal() {
     document.getElementById('upgradeModal').classList.remove('hidden');
@@ -1226,6 +1250,7 @@ function openUpgradeModal() {
     document.getElementById('upgradeProgress').classList.add('hidden');
     document.getElementById('upgradeComplete').classList.add('hidden');
     document.getElementById('upgradeFailed').classList.add('hidden');
+    document.getElementById('upgradeRestarting').classList.add('hidden');
     document.getElementById('upgradeModalClose').style.display = '';
 }
 
@@ -1239,17 +1264,22 @@ function closeUpgradeModal() {
     fetch('/api/system/upgrade/reset', { method: 'POST' });
 }
 
-async function startUpgrade() {
+async function startUpgrade(type = 'full') {
+    currentUpgradeType = type;
     document.getElementById('upgradeInitial').classList.add('hidden');
     document.getElementById('upgradeProgress').classList.remove('hidden');
     document.getElementById('upgradeModalClose').style.display = 'none';
 
     try {
-        const response = await fetch('/api/system/upgrade', { method: 'POST' });
+        const response = await fetch('/api/system/upgrade', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: type })
+        });
         const data = await response.json();
 
         if (response.ok) {
-            addLog('INFO', 'System upgrade started');
+            addLog('INFO', `${type.toUpperCase()} upgrade started`);
             startUpgradePolling();
         } else {
             addLog('ERROR', data.error || 'Failed to start upgrade');
@@ -1273,7 +1303,7 @@ function startUpgradePolling() {
                 upgradePollingInterval = null;
 
                 if (status.completed) {
-                    showUpgradeComplete();
+                    showUpgradeComplete(status.reboot_required, status.upgrade_type);
                 } else if (status.error) {
                     showUpgradeError(status.error);
                 }
@@ -1302,11 +1332,91 @@ function updateUpgradeUI(status) {
     logContainer.scrollTop = logContainer.scrollHeight;
 }
 
-function showUpgradeComplete() {
+function showUpgradeComplete(rebootRequired, upgradeType) {
     document.getElementById('upgradeProgress').classList.add('hidden');
     document.getElementById('upgradeComplete').classList.remove('hidden');
     document.getElementById('upgradeModalClose').style.display = '';
-    addLog('SUCCESS', 'System upgrade completed');
+
+    const msgEl = document.getElementById('upgradeCompleteMsg');
+    const actionsEl = document.getElementById('upgradeCompleteActions');
+
+    if (rebootRequired) {
+        // Full system upgrade with kernel update - show reboot option
+        msgEl.textContent = 'A system reboot is recommended to complete the kernel update.';
+        actionsEl.innerHTML = `
+            <button class="btn btn-warning" onclick="confirmReboot()">REBOOT NOW</button>
+            <button class="btn btn-secondary" onclick="closeUpgradeModal()">LATER</button>
+        `;
+    } else if (upgradeType === 'ui') {
+        // UI-only upgrade - show restart app option
+        msgEl.textContent = 'Restart the application to apply updates.';
+        actionsEl.innerHTML = `
+            <button class="btn btn-primary" onclick="restartApp()">RESTART APP</button>
+            <button class="btn btn-secondary" onclick="closeUpgradeModal()">LATER</button>
+        `;
+    } else {
+        // Full system upgrade, no reboot needed
+        msgEl.textContent = 'All updates applied successfully.';
+        actionsEl.innerHTML = `
+            <button class="btn btn-primary" onclick="restartApp()">RESTART APP</button>
+            <button class="btn btn-secondary" onclick="closeUpgradeModal()">CLOSE</button>
+        `;
+    }
+
+    addLog('SUCCESS', 'Upgrade completed');
+}
+
+async function restartApp() {
+    document.getElementById('upgradeComplete').classList.add('hidden');
+    document.getElementById('upgradeRestarting').classList.remove('hidden');
+    document.getElementById('upgradeModalClose').style.display = 'none';
+
+    addLog('INFO', 'Restarting application...');
+
+    try {
+        await fetch('/api/system/restart-app', { method: 'POST' });
+
+        // Wait and then start polling for reconnection
+        setTimeout(() => {
+            pollForReconnection();
+        }, 2000);
+    } catch (error) {
+        // Expected - server is restarting
+        setTimeout(() => {
+            pollForReconnection();
+        }, 2000);
+    }
+}
+
+function pollForReconnection() {
+    let attempts = 0;
+    const maxAttempts = 30;
+
+    const checkInterval = setInterval(async () => {
+        attempts++;
+        try {
+            const response = await fetch('/api/version', { cache: 'no-store' });
+            if (response.ok) {
+                clearInterval(checkInterval);
+                addLog('SUCCESS', 'Application restarted successfully');
+                // Reload the page to get fresh content
+                window.location.reload();
+            }
+        } catch (error) {
+            // Still waiting for server
+            if (attempts >= maxAttempts) {
+                clearInterval(checkInterval);
+                document.getElementById('upgradeRestarting').innerHTML = `
+                    <div style="text-align: center;">
+                        <span style="font-size: 40px;">&#9888;</span>
+                        <h3 style="color: var(--accent-warning);">Restart Taking Longer Than Expected</h3>
+                        <p style="color: var(--text-muted);">Please refresh the page manually.</p>
+                        <button class="btn btn-primary" onclick="window.location.reload()" style="margin-top: 15px;">REFRESH PAGE</button>
+                    </div>
+                `;
+            }
+        }
+    }, 1000);
 }
 
 function showUpgradeError(error) {
@@ -1318,7 +1428,7 @@ function showUpgradeError(error) {
 
 function retryUpgrade() {
     document.getElementById('upgradeFailed').classList.add('hidden');
-    startUpgrade();
+    startUpgrade(currentUpgradeType || 'full');
 }
 
 // Listen for upgrade progress via websocket
@@ -1414,6 +1524,15 @@ function updateMapWithLocalNode() {
     const localIP = localNodeData.ip || localNodeData.localPeerState?.ip;
     const fqdn = localNodeData.fqdn || localNodeData.localPeerState?.fqdn;
 
+    // Get network name for local node (same format as peers)
+    let localName = fqdn || CONFIG.hostname || 'Local';
+    if (localName.includes('.')) {
+        localName = localName.split('.')[0];
+    }
+    if (localName.toLowerCase().includes('netbird')) {
+        localName = CONFIG.hostname || localIP || 'Local';
+    }
+
     // Try to get location - prioritize GPS data from gpsd
     let lat = null;
     let lng = null;
@@ -1443,15 +1562,15 @@ function updateMapWithLocalNode() {
     }
 
     // If we have valid coordinates, add local node marker
+    // Local node uses cyan/blue color (different from green peers) - no label needed
     if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
         const el = document.createElement('div');
         el.className = 'map-marker local-node online';
         el.innerHTML = `
             <div class="marker-dot"></div>
             <div class="marker-pulse"></div>
-            <div class="marker-label">LOCAL</div>
         `;
-        el.title = 'Local Node';
+        el.title = `${localName} (You)`;
 
         // Build popup content with GPS info if available
         let gpsDetails = '';
@@ -1470,9 +1589,9 @@ function updateMapWithLocalNode() {
 
         const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(`
             <div class="map-popup">
-                <strong>LOCAL NODE</strong>
+                <strong style="color: #00d4ff;">${localName}</strong>
+                <div style="font-size: 9px; color: #00d4ff; margin-bottom: 4px;">(This Node)</div>
                 <div>${localIP || '--'}</div>
-                <div style="font-size: 10px; color: #888;">${fqdn || ''}</div>
                 <div style="font-size: 9px; color: #666; margin-top: 4px;">
                     ${lat.toFixed(6)}, ${lng.toFixed(6)}
                 </div>
@@ -1524,6 +1643,203 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchLocalNodeInfo();
     setInterval(fetchLocalNodeInfo, 10000); // Refresh every 10 seconds for GPS updates
 });
+
+// ==================== CONTEXT MENU & SPEEDTEST ====================
+
+let contextMenuPeer = null;
+let speedtestPollingInterval = null;
+
+// Context menu for peer items
+document.addEventListener('contextmenu', (e) => {
+    const peerItem = e.target.closest('.peer-item');
+    if (peerItem) {
+        e.preventDefault();
+
+        // Find the peer data
+        const peerIP = peerItem.getAttribute('data-peer-ip');
+        const peer = allPeers.find(p => p.ip === peerIP);
+
+        if (peer && peer.connected) {
+            contextMenuPeer = peer;
+
+            const menu = document.getElementById('peerContextMenu');
+            menu.style.left = `${e.clientX}px`;
+            menu.style.top = `${e.clientY}px`;
+            menu.classList.remove('hidden');
+        }
+    }
+});
+
+// Hide context menu on click elsewhere
+document.addEventListener('click', () => {
+    const menu = document.getElementById('peerContextMenu');
+    if (menu) {
+        menu.classList.add('hidden');
+    }
+});
+
+function runSpeedtest() {
+    if (!contextMenuPeer || !contextMenuPeer.ip) {
+        addLog('ERROR', 'No peer selected for speedtest');
+        return;
+    }
+
+    openSpeedtestModal(contextMenuPeer);
+}
+
+function showPeerDetailsFromContext() {
+    if (contextMenuPeer) {
+        showPeerDetails(contextMenuPeer);
+    }
+}
+
+function openSpeedtestModal(peer) {
+    const modal = document.getElementById('speedtestModal');
+    const targetIP = document.getElementById('speedtestTargetIP');
+    const peerName = getNetworkName(peer);
+
+    targetIP.textContent = `${peerName} (${peer.ip})`;
+
+    // Reset UI
+    document.getElementById('downloadSpeed').textContent = '0';
+    document.getElementById('uploadSpeed').textContent = '0';
+    document.getElementById('downloadGaugeFill').style.strokeDashoffset = '339.292';
+    document.getElementById('uploadGaugeFill').style.strokeDashoffset = '339.292';
+    document.getElementById('speedtestProgressFill').style.width = '0%';
+    document.getElementById('speedtestStatus').textContent = 'Connecting...';
+    document.getElementById('speedtestResults').classList.add('hidden');
+    document.getElementById('speedtestError').classList.add('hidden');
+    document.getElementById('speedtestModalClose').style.display = 'none';
+
+    modal.classList.remove('hidden');
+
+    // Start the test
+    startSpeedtest(peer.ip);
+}
+
+function closeSpeedtestModal() {
+    document.getElementById('speedtestModal').classList.add('hidden');
+    if (speedtestPollingInterval) {
+        clearInterval(speedtestPollingInterval);
+        speedtestPollingInterval = null;
+    }
+}
+
+async function startSpeedtest(targetIP) {
+    try {
+        const response = await fetch(`/api/iperf/${targetIP}`, { method: 'POST' });
+        const data = await response.json();
+
+        if (response.ok) {
+            addLog('INFO', `Speedtest started to ${targetIP}`);
+            startSpeedtestPolling();
+        } else {
+            showSpeedtestError(data.error || 'Failed to start speedtest');
+        }
+    } catch (error) {
+        showSpeedtestError(error.message);
+    }
+}
+
+function startSpeedtestPolling() {
+    let progressPercent = 0;
+
+    speedtestPollingInterval = setInterval(async () => {
+        try {
+            const response = await fetch('/api/iperf/status');
+            const status = await response.json();
+
+            if (status.running) {
+                // Update progress
+                progressPercent = Math.min(progressPercent + 10, 95);
+                document.getElementById('speedtestProgressFill').style.width = `${progressPercent}%`;
+                document.getElementById('speedtestStatus').textContent = 'Testing throughput...';
+
+                // Update gauges with latest result
+                if (status.results && status.results.length > 0) {
+                    const latest = status.results[status.results.length - 1];
+                    const speedMbps = (latest.bits_per_second / 1000000).toFixed(1);
+                    updateSpeedGauge('download', speedMbps);
+                }
+            } else {
+                clearInterval(speedtestPollingInterval);
+                speedtestPollingInterval = null;
+
+                if (status.error) {
+                    showSpeedtestError(status.error);
+                } else if (status.final) {
+                    showSpeedtestResults(status.final);
+                }
+            }
+        } catch (error) {
+            console.error('Speedtest polling error:', error);
+        }
+    }, 500);
+}
+
+function updateSpeedGauge(type, speedMbps) {
+    const maxSpeed = 1000; // Max gauge at 1 Gbps
+    const percent = Math.min(parseFloat(speedMbps) / maxSpeed * 100, 100);
+    const circumference = 339.292;
+    const offset = circumference - (circumference * percent / 100);
+
+    document.getElementById(`${type}Speed`).textContent = speedMbps;
+    document.getElementById(`${type}GaugeFill`).style.strokeDashoffset = offset;
+}
+
+function showSpeedtestResults(final) {
+    document.getElementById('speedtestProgressFill').style.width = '100%';
+    document.getElementById('speedtestStatus').textContent = 'Test complete!';
+    document.getElementById('speedtestModalClose').style.display = '';
+
+    // Update final speeds
+    const downloadMbps = (final.received.bits_per_second / 1000000).toFixed(1);
+    const uploadMbps = (final.sent.bits_per_second / 1000000).toFixed(1);
+
+    updateSpeedGauge('download', downloadMbps);
+    updateSpeedGauge('upload', uploadMbps);
+
+    // Show results
+    const totalBytes = final.sent.bytes + final.received.bytes;
+    document.getElementById('resultDataTransferred').textContent = formatBytes(totalBytes);
+    document.getElementById('resultRetransmits').textContent = final.sent.retransmits || '0';
+    document.getElementById('speedtestResults').classList.remove('hidden');
+
+    addLog('SUCCESS', `Speedtest: ${downloadMbps} Mbps down, ${uploadMbps} Mbps up`);
+}
+
+function showSpeedtestError(error) {
+    document.getElementById('speedtestStatus').textContent = 'Test failed';
+    document.getElementById('speedtestModalClose').style.display = '';
+    document.getElementById('speedtestErrorMsg').textContent = error;
+    document.getElementById('speedtestError').classList.remove('hidden');
+
+    addLog('ERROR', `Speedtest failed: ${error}`);
+}
+
+// Listen for iperf progress via websocket
+if (typeof socket !== 'undefined' && socket) {
+    socket.on('iperf_progress', (data) => {
+        if (data.results && data.results.length > 0) {
+            const latest = data.results[data.results.length - 1];
+            const speedMbps = (latest.bits_per_second / 1000000).toFixed(1);
+            updateSpeedGauge('download', speedMbps);
+        }
+    });
+
+    socket.on('iperf_complete', (data) => {
+        if (speedtestPollingInterval) {
+            clearInterval(speedtestPollingInterval);
+            speedtestPollingInterval = null;
+        }
+
+        if (data.error) {
+            showSpeedtestError(data.error);
+        } else if (data.final) {
+            showSpeedtestResults(data.final);
+        }
+    });
+}
 
 // ==================== CLEANUP ====================
 

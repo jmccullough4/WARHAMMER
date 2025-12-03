@@ -51,7 +51,12 @@ def get_app_version():
             capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
+            tag = result.stdout.strip()
+            # If it's a proper version tag, use it
+            if tag.startswith('v') or tag.startswith('3.'):
+                return tag
+            # Otherwise it's a commit hash
+            return f"3.1.0-{tag}"
 
         # Fallback: get short commit hash
         result = subprocess.run(
@@ -60,10 +65,10 @@ def get_app_version():
             capture_output=True, text=True, timeout=5
         )
         if result.returncode == 0 and result.stdout.strip():
-            return f"2.2.0-{result.stdout.strip()}"
+            return f"3.1.0-{result.stdout.strip()}"
     except:
         pass
-    return "2.2.0"
+    return "3.1.0"
 
 APP_VERSION = get_app_version()
 
@@ -800,11 +805,33 @@ upgrade_status = {
     'stage': '',
     'log': [],
     'error': None,
-    'completed': False
+    'completed': False,
+    'reboot_required': False,
+    'upgrade_type': None
 }
 
-def run_upgrade_task():
-    """Background task to run system upgrade"""
+def check_reboot_required():
+    """Check if system reboot is required after upgrade"""
+    # Check for Ubuntu/Debian reboot-required file
+    if os.path.exists('/var/run/reboot-required'):
+        return True
+    # Check for reboot-required.pkgs for kernel updates
+    if os.path.exists('/var/run/reboot-required.pkgs'):
+        try:
+            with open('/var/run/reboot-required.pkgs', 'r') as f:
+                pkgs = f.read()
+                if 'linux-' in pkgs:
+                    return True
+        except:
+            pass
+    return False
+
+def run_upgrade_task(upgrade_type='full'):
+    """Background task to run system upgrade
+
+    Args:
+        upgrade_type: 'ui' for UI-only (fast), 'full' for full system upgrade
+    """
     global upgrade_status
     upgrade_status = {
         'running': True,
@@ -812,75 +839,126 @@ def run_upgrade_task():
         'stage': 'Starting upgrade...',
         'log': [],
         'error': None,
-        'completed': False
+        'completed': False,
+        'reboot_required': False,
+        'upgrade_type': upgrade_type
     }
 
     try:
-        # Stage 1: Update package lists
-        upgrade_status['stage'] = 'Updating package lists...'
-        upgrade_status['progress'] = 10
-        upgrade_status['log'].append('[INFO] Running apt update...')
-        socketio.emit('upgrade_progress', upgrade_status)
-
-        result = subprocess.run(
-            ['sudo', 'apt', 'update', '-y'],
-            capture_output=True, text=True, timeout=300
-        )
-        if result.returncode != 0:
-            raise Exception(f"apt update failed: {result.stderr}")
-        upgrade_status['log'].append('[OK] Package lists updated')
-
-        # Stage 2: Upgrade packages
-        upgrade_status['stage'] = 'Upgrading packages...'
-        upgrade_status['progress'] = 30
-        upgrade_status['log'].append('[INFO] Running apt upgrade...')
-        socketio.emit('upgrade_progress', upgrade_status)
-
-        result = subprocess.run(
-            ['sudo', 'apt', 'upgrade', '-y'],
-            capture_output=True, text=True, timeout=1800
-        )
-        if result.returncode != 0:
-            raise Exception(f"apt upgrade failed: {result.stderr}")
-        upgrade_status['log'].append('[OK] System packages upgraded')
-        upgrade_status['progress'] = 60
-        socketio.emit('upgrade_progress', upgrade_status)
-
-        # Stage 3: Update WARHAMMER application (git pull)
-        upgrade_status['stage'] = 'Updating WARHAMMER application...'
-        upgrade_status['progress'] = 70
-        upgrade_status['log'].append('[INFO] Checking for WARHAMMER updates...')
-        socketio.emit('upgrade_progress', upgrade_status)
-
         app_dir = os.path.dirname(os.path.abspath(__file__))
-        if os.path.exists(os.path.join(app_dir, '.git')):
+
+        if upgrade_type == 'full':
+            # Full system upgrade: apt update/upgrade + UI
+
+            # Stage 1: Update package lists
+            upgrade_status['stage'] = 'Updating package lists...'
+            upgrade_status['progress'] = 10
+            upgrade_status['log'].append('[INFO] Running apt update...')
+            socketio.emit('upgrade_progress', upgrade_status)
+
             result = subprocess.run(
-                ['git', 'pull', '--ff-only'],
-                cwd=app_dir,
-                capture_output=True, text=True, timeout=120
+                ['sudo', 'apt', 'update', '-y'],
+                capture_output=True, text=True, timeout=300
             )
-            if result.returncode == 0:
-                upgrade_status['log'].append(f'[OK] WARHAMMER updated: {result.stdout.strip()}')
+            if result.returncode != 0:
+                raise Exception(f"apt update failed: {result.stderr}")
+            upgrade_status['log'].append('[OK] Package lists updated')
+
+            # Stage 2: Upgrade packages
+            upgrade_status['stage'] = 'Upgrading system packages...'
+            upgrade_status['progress'] = 30
+            upgrade_status['log'].append('[INFO] Running apt upgrade...')
+            socketio.emit('upgrade_progress', upgrade_status)
+
+            result = subprocess.run(
+                ['sudo', 'apt', 'upgrade', '-y'],
+                capture_output=True, text=True, timeout=1800
+            )
+            if result.returncode != 0:
+                raise Exception(f"apt upgrade failed: {result.stderr}")
+            upgrade_status['log'].append('[OK] System packages upgraded')
+            upgrade_status['progress'] = 60
+            socketio.emit('upgrade_progress', upgrade_status)
+
+            # Stage 3: Update WARHAMMER application (git pull)
+            upgrade_status['stage'] = 'Updating WARHAMMER application...'
+            upgrade_status['progress'] = 70
+            upgrade_status['log'].append('[INFO] Checking for WARHAMMER updates...')
+            socketio.emit('upgrade_progress', upgrade_status)
+
+            if os.path.exists(os.path.join(app_dir, '.git')):
+                result = subprocess.run(
+                    ['git', 'pull', '--ff-only'],
+                    cwd=app_dir,
+                    capture_output=True, text=True, timeout=120
+                )
+                if result.returncode == 0:
+                    upgrade_status['log'].append(f'[OK] WARHAMMER updated: {result.stdout.strip()}')
+                else:
+                    upgrade_status['log'].append(f'[WARN] Git pull skipped: {result.stderr.strip()}')
             else:
-                upgrade_status['log'].append(f'[WARN] Git pull skipped: {result.stderr.strip()}')
+                upgrade_status['log'].append('[INFO] Not a git repository, skipping app update')
+
+            # Stage 4: Cleanup
+            upgrade_status['stage'] = 'Cleaning up...'
+            upgrade_status['progress'] = 85
+            upgrade_status['log'].append('[INFO] Running apt autoremove...')
+            socketio.emit('upgrade_progress', upgrade_status)
+
+            subprocess.run(['sudo', 'apt', 'autoremove', '-y'], capture_output=True, timeout=300)
+            upgrade_status['log'].append('[OK] Cleanup completed')
+
+            # Check if reboot is required
+            upgrade_status['reboot_required'] = check_reboot_required()
+            if upgrade_status['reboot_required']:
+                upgrade_status['log'].append('[INFO] System reboot recommended (kernel update detected)')
+
         else:
-            upgrade_status['log'].append('[INFO] Not a git repository, skipping app update')
+            # UI-only upgrade: just git pull
+            upgrade_status['stage'] = 'Updating WARHAMMER UI...'
+            upgrade_status['progress'] = 20
+            upgrade_status['log'].append('[INFO] Fetching latest WARHAMMER updates...')
+            socketio.emit('upgrade_progress', upgrade_status)
 
-        # Stage 4: Cleanup
-        upgrade_status['stage'] = 'Cleaning up...'
-        upgrade_status['progress'] = 85
-        upgrade_status['log'].append('[INFO] Running apt autoremove...')
-        socketio.emit('upgrade_progress', upgrade_status)
+            if os.path.exists(os.path.join(app_dir, '.git')):
+                # Fetch first
+                result = subprocess.run(
+                    ['git', 'fetch', 'origin'],
+                    cwd=app_dir,
+                    capture_output=True, text=True, timeout=120
+                )
+                upgrade_status['progress'] = 40
+                socketio.emit('upgrade_progress', upgrade_status)
 
-        subprocess.run(['sudo', 'apt', 'autoremove', '-y'], capture_output=True, timeout=300)
-        upgrade_status['log'].append('[OK] Cleanup completed')
+                # Pull changes
+                result = subprocess.run(
+                    ['git', 'pull', '--ff-only'],
+                    cwd=app_dir,
+                    capture_output=True, text=True, timeout=120
+                )
+                if result.returncode == 0:
+                    output = result.stdout.strip()
+                    if 'Already up to date' in output:
+                        upgrade_status['log'].append('[OK] WARHAMMER is already up to date')
+                    else:
+                        upgrade_status['log'].append(f'[OK] WARHAMMER updated: {output}')
+                else:
+                    upgrade_status['log'].append(f'[WARN] Git pull issue: {result.stderr.strip()}')
+
+                upgrade_status['progress'] = 80
+                socketio.emit('upgrade_progress', upgrade_status)
+            else:
+                upgrade_status['log'].append('[WARN] Not a git repository, no updates available')
+
+            # UI-only never requires reboot
+            upgrade_status['reboot_required'] = False
 
         # Done
         upgrade_status['stage'] = 'Upgrade completed successfully!'
         upgrade_status['progress'] = 100
         upgrade_status['completed'] = True
         upgrade_status['running'] = False
-        upgrade_status['log'].append('[SUCCESS] System upgrade completed')
+        upgrade_status['log'].append('[SUCCESS] Upgrade completed')
         socketio.emit('upgrade_progress', upgrade_status)
 
     except Exception as e:
@@ -899,11 +977,18 @@ def start_system_upgrade():
     if upgrade_status['running']:
         return jsonify({'error': 'Upgrade already in progress'}), 409
 
+    # Get upgrade type from request
+    data = request.json or {}
+    upgrade_type = data.get('type', 'full')  # 'ui' or 'full'
+
+    if upgrade_type not in ['ui', 'full']:
+        return jsonify({'error': 'Invalid upgrade type'}), 400
+
     # Start upgrade in background thread
-    upgrade_thread = threading.Thread(target=run_upgrade_task, daemon=True)
+    upgrade_thread = threading.Thread(target=run_upgrade_task, args=(upgrade_type,), daemon=True)
     upgrade_thread.start()
 
-    return jsonify({'status': 'started', 'message': 'System upgrade started'})
+    return jsonify({'status': 'started', 'message': f'{upgrade_type.upper()} upgrade started', 'type': upgrade_type})
 
 @app.route('/api/system/upgrade/status')
 @login_required
@@ -923,9 +1008,174 @@ def reset_upgrade_status():
             'stage': '',
             'log': [],
             'error': None,
-            'completed': False
+            'completed': False,
+            'reboot_required': False,
+            'upgrade_type': None
         }
     return jsonify({'status': 'reset'})
+
+@app.route('/api/system/restart-app', methods=['POST'])
+@login_required
+def restart_app():
+    """Restart the WARHAMMER application"""
+    try:
+        # Use systemctl to restart the service if running as a service
+        # Otherwise just exit and let supervisor/systemd restart
+        service_name = 'warhammer'
+        result = subprocess.run(
+            ['systemctl', 'is-active', service_name],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            # Running as systemd service
+            subprocess.Popen(['sudo', 'systemctl', 'restart', service_name])
+            return jsonify({'status': 'restarting', 'method': 'systemd'})
+        else:
+            # Just exit, let the parent process restart us
+            def delayed_exit():
+                time.sleep(1)
+                os._exit(0)
+            threading.Thread(target=delayed_exit, daemon=True).start()
+            return jsonify({'status': 'restarting', 'method': 'exit'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ==================== IPERF3 SPEEDTEST ====================
+
+iperf_status = {
+    'running': False,
+    'target': None,
+    'results': [],
+    'final': None,
+    'error': None
+}
+
+def run_iperf_test(target_ip):
+    """Run iperf3 test against target peer"""
+    global iperf_status
+    iperf_status = {
+        'running': True,
+        'target': target_ip,
+        'results': [],
+        'final': None,
+        'error': None
+    }
+
+    try:
+        # Run iperf3 client with JSON output, 10 second test
+        process = subprocess.Popen(
+            ['iperf3', '-c', target_ip, '-t', '10', '-J', '--forceflush'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        # Read output incrementally
+        output_buffer = ''
+        while True:
+            chunk = process.stdout.read(1024)
+            if not chunk and process.poll() is not None:
+                break
+            output_buffer += chunk
+
+            # Try to emit intermediate results
+            try:
+                partial = json.loads(output_buffer + ']}')
+                if 'intervals' in partial:
+                    for interval in partial['intervals']:
+                        if 'streams' in interval:
+                            for stream in interval['streams']:
+                                result = {
+                                    'seconds': stream.get('end', 0),
+                                    'bytes': stream.get('bytes', 0),
+                                    'bits_per_second': stream.get('bits_per_second', 0),
+                                    'retransmits': stream.get('retransmits', 0)
+                                }
+                                if result not in iperf_status['results']:
+                                    iperf_status['results'].append(result)
+                                    socketio.emit('iperf_progress', iperf_status)
+            except:
+                pass
+
+        # Wait for completion
+        process.wait(timeout=15)
+
+        # Parse final JSON output
+        try:
+            full_result = json.loads(output_buffer)
+            if 'end' in full_result:
+                end = full_result['end']
+                if 'sum_sent' in end:
+                    iperf_status['final'] = {
+                        'sent': {
+                            'bytes': end['sum_sent'].get('bytes', 0),
+                            'bits_per_second': end['sum_sent'].get('bits_per_second', 0),
+                            'retransmits': end['sum_sent'].get('retransmits', 0)
+                        },
+                        'received': {
+                            'bytes': end.get('sum_received', {}).get('bytes', 0),
+                            'bits_per_second': end.get('sum_received', {}).get('bits_per_second', 0)
+                        }
+                    }
+                elif 'streams' in end:
+                    # Fallback for different iperf3 versions
+                    stream = end['streams'][0] if end['streams'] else {}
+                    iperf_status['final'] = {
+                        'sent': {
+                            'bytes': stream.get('sender', {}).get('bytes', 0),
+                            'bits_per_second': stream.get('sender', {}).get('bits_per_second', 0)
+                        },
+                        'received': {
+                            'bytes': stream.get('receiver', {}).get('bytes', 0),
+                            'bits_per_second': stream.get('receiver', {}).get('bits_per_second', 0)
+                        }
+                    }
+        except json.JSONDecodeError:
+            iperf_status['error'] = 'Failed to parse iperf3 output'
+
+        iperf_status['running'] = False
+        socketio.emit('iperf_complete', iperf_status)
+
+    except subprocess.TimeoutExpired:
+        process.kill()
+        iperf_status['error'] = 'Test timed out'
+        iperf_status['running'] = False
+        socketio.emit('iperf_complete', iperf_status)
+    except FileNotFoundError:
+        iperf_status['error'] = 'iperf3 not installed on this system'
+        iperf_status['running'] = False
+        socketio.emit('iperf_complete', iperf_status)
+    except Exception as e:
+        iperf_status['error'] = str(e)
+        iperf_status['running'] = False
+        socketio.emit('iperf_complete', iperf_status)
+
+@app.route('/api/iperf/<target>', methods=['POST'])
+@login_required
+def start_iperf_test(target):
+    """Start iperf3 test against target peer"""
+    global iperf_status
+
+    if iperf_status['running']:
+        return jsonify({'error': 'Test already in progress'}), 409
+
+    # Validate target IP
+    try:
+        ipaddress.ip_address(target)
+    except ValueError:
+        return jsonify({'error': 'Invalid IP address'}), 400
+
+    # Start test in background
+    iperf_thread = threading.Thread(target=run_iperf_test, args=(target,), daemon=True)
+    iperf_thread.start()
+
+    return jsonify({'status': 'started', 'target': target})
+
+@app.route('/api/iperf/status')
+@login_required
+def get_iperf_status():
+    """Get current iperf test status"""
+    return jsonify(iperf_status)
 
 # ==================== WEBSOCKET HANDLERS ====================
 

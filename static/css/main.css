@@ -2157,3 +2157,321 @@ body {
     font-family: var(--font-mono);
     font-size: 11px;
 }
+
+/* ==================== UPGRADE OPTIONS ==================== */
+
+.upgrade-options {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.upgrade-option {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 15px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.upgrade-option:hover {
+    border-color: var(--accent-primary);
+    background: rgba(255, 107, 53, 0.1);
+    transform: translateX(3px);
+}
+
+.upgrade-option-icon {
+    font-size: 28px;
+    width: 50px;
+    text-align: center;
+}
+
+.upgrade-option-info h4 {
+    margin: 0 0 5px 0;
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.upgrade-option-info p {
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.upgrade-fast {
+    color: var(--accent-success);
+    font-size: 11px;
+    font-weight: normal;
+}
+
+/* ==================== RESTART ANIMATION ==================== */
+
+.restart-animation {
+    text-align: center;
+    padding: 30px 20px;
+}
+
+.restart-spinner {
+    width: 60px;
+    height: 60px;
+    margin: 0 auto 20px;
+    border: 3px solid var(--border-color);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.restart-animation h3 {
+    color: var(--accent-primary);
+    margin-bottom: 10px;
+}
+
+.restart-animation p {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.restart-dots {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 15px;
+}
+
+.restart-dots span {
+    width: 8px;
+    height: 8px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+    animation: bounce 1.4s ease-in-out infinite both;
+}
+
+.restart-dots span:nth-child(1) { animation-delay: -0.32s; }
+.restart-dots span:nth-child(2) { animation-delay: -0.16s; }
+.restart-dots span:nth-child(3) { animation-delay: 0s; }
+
+@keyframes bounce {
+    0%, 80%, 100% { transform: scale(0); }
+    40% { transform: scale(1); }
+}
+
+/* ==================== CONTEXT MENU ==================== */
+
+.context-menu {
+    position: fixed;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    z-index: 2000;
+    min-width: 160px;
+    padding: 4px 0;
+}
+
+.context-menu-item {
+    padding: 10px 15px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: background 0.15s;
+}
+
+.context-menu-item:hover {
+    background: rgba(255, 107, 53, 0.15);
+    color: var(--accent-primary);
+}
+
+.context-menu-item span {
+    font-size: 14px;
+}
+
+/* ==================== SPEEDTEST MODAL ==================== */
+
+.speedtest-modal {
+    max-width: 450px;
+}
+
+.speedtest-target {
+    text-align: center;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    margin-bottom: 20px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.speedtest-target span {
+    color: var(--accent-primary);
+    font-weight: 600;
+}
+
+.speedtest-gauges {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin-bottom: 25px;
+}
+
+.speedtest-gauge {
+    text-align: center;
+}
+
+.speedtest-gauge-circle {
+    position: relative;
+    width: 120px;
+    height: 120px;
+}
+
+.speedtest-gauge-circle svg {
+    transform: rotate(-90deg);
+}
+
+.speedtest-gauge-circle .gauge-bg {
+    fill: none;
+    stroke: var(--bg-tertiary);
+    stroke-width: 8;
+}
+
+.speedtest-gauge-circle .gauge-fill {
+    fill: none;
+    stroke-width: 8;
+    stroke-linecap: round;
+    stroke-dasharray: 339.292;
+    stroke-dashoffset: 339.292;
+    transition: stroke-dashoffset 0.3s ease;
+}
+
+.speedtest-gauge-circle .gauge-fill.download {
+    stroke: var(--accent-success);
+    filter: drop-shadow(0 0 6px rgba(48, 209, 88, 0.5));
+}
+
+.speedtest-gauge-circle .gauge-fill.upload {
+    stroke: var(--accent-primary);
+    filter: drop-shadow(0 0 6px rgba(255, 107, 53, 0.5));
+}
+
+.speedtest-gauge-value {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -60%);
+    font-family: var(--font-mono);
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.speedtest-gauge-unit {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, 40%);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.speedtest-gauge-label {
+    margin-top: 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+}
+
+.speedtest-progress {
+    margin-bottom: 20px;
+}
+
+.speedtest-progress-bar {
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.speedtest-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent-success), var(--accent-primary));
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.speedtest-status {
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent-info);
+}
+
+.speedtest-results {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    padding: 15px;
+}
+
+.speedtest-result-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.speedtest-result-row:last-child {
+    border-bottom: none;
+}
+
+.result-label {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.result-value {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent-primary);
+}
+
+.speedtest-error {
+    text-align: center;
+    padding: 15px;
+    background: rgba(255, 59, 48, 0.1);
+    border: 1px solid var(--accent-danger);
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--accent-danger);
+}
+
+/* ==================== PEER MARKER LABELS ==================== */
+
+.marker-label {
+    position: absolute;
+    bottom: -16px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    text-shadow: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.7);
+    background: rgba(0, 0, 0, 0.6);
+    padding: 1px 4px;
+    border-radius: 2px;
+}
