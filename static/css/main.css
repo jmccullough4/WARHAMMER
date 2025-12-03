@@ -334,6 +334,7 @@ body {
     border-radius: 4px;
     cursor: pointer;
     transition: all 0.2s ease;
+    position: relative;
 }
 
 .cellular-indicator:hover {
@@ -342,51 +343,52 @@ body {
 }
 
 .cellular-indicator.connected {
-    border-color: var(--accent-success);
+    border-color: var(--accent-primary);
 }
 
 .cellular-indicator.disconnected {
-    border-color: var(--accent-danger);
+    border-color: var(--text-muted);
+    opacity: 0.6;
 }
 
 .signal-bars {
     display: flex;
     align-items: flex-end;
     gap: 2px;
-    height: 16px;
+    height: 14px;
 }
 
 .signal-bar {
-    width: 4px;
+    width: 3px;
     background: var(--text-muted);
     border-radius: 1px;
     transition: all 0.3s ease;
 }
 
-.signal-bar:nth-child(1) { height: 4px; }
-.signal-bar:nth-child(2) { height: 7px; }
-.signal-bar:nth-child(3) { height: 11px; }
-.signal-bar:nth-child(4) { height: 16px; }
+.signal-bar:nth-child(1) { height: 3px; }
+.signal-bar:nth-child(2) { height: 6px; }
+.signal-bar:nth-child(3) { height: 9px; }
+.signal-bar:nth-child(4) { height: 14px; }
 
 .signal-bar.active {
-    background: var(--accent-success);
-    box-shadow: 0 0 4px var(--accent-success);
+    background: var(--accent-primary);
+    box-shadow: 0 0 4px rgba(255, 107, 53, 0.5);
 }
 
 .signal-bar.weak {
     background: var(--accent-warning);
-    box-shadow: 0 0 4px var(--accent-warning);
+    box-shadow: 0 0 4px rgba(255, 176, 0, 0.5);
 }
 
 .signal-bar.no-signal {
-    background: var(--accent-danger);
+    background: var(--text-muted);
 }
 
 .cellular-tech {
     font-family: var(--font-mono);
     font-size: 9px;
     font-weight: 600;
-    color: var(--accent-info);
+    color: var(--accent-secondary);
     letter-spacing: 0.5px;
 }
 
