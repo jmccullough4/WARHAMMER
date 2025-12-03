@@ -675,9 +675,10 @@ function updateMapMarkers(peers) {
     let hasValidCoords = false;
 
     peers.forEach(peer => {
-        // Check for GPS coordinates - try multiple possible field names
-        let lat = peer.location?.latitude || peer.geoLocation?.latitude || peer.latitude;
-        let lng = peer.location?.longitude || peer.geoLocation?.longitude || peer.longitude;
+        // Use getPeerLocation to check all possible GPS field locations
+        const loc = getPeerLocation(peer);
+        let lat = loc.lat;
+        let lng = loc.lon;
 
         // Also check city_name with country for geocoding hint
         if (!lat && !lng && peer.city_name && peer.country_code) {
