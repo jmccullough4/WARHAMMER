@@ -674,7 +674,15 @@ function updateMapMarkers(peers) {
     const bounds = new mapboxgl.LngLatBounds();
     let hasValidCoords = false;
 
+    // Get local node IP to filter it out (avoid double plotting)
+    const localIP = localNodeData?.ip || localNodeData?.localPeerState?.ip;
+
     peers.forEach(peer => {
+        // Skip local peer - it's plotted separately with special styling
+        if (localIP && peer.ip === localIP) {
+            return;
+        }
+
         // Use getPeerLocation to check all possible GPS field locations
         const loc = getPeerLocation(peer);
         let lat = loc.lat;
@@ -1447,22 +1455,49 @@ async function openUpgradeModal() {
 
 async function checkForUpdates() {
     const previewContainer = document.getElementById('upgradePreview');
+    const upgradeActions = document.getElementById('upgradeActions');
+    const noUpdatesMessage = document.getElementById('noUpdatesMessage');
+    const uiUpgradeOption = document.getElementById('uiUpgradeOption');
+    const fullUpgradeOption = document.getElementById('fullUpgradeOption');
+
     if (!previewContainer) return;
 
-    previewContainer.innerHTML = '<div style="color: var(--text-muted); padding: 10px;">Checking for updates...</div>';
+    // Reset state
+    previewContainer.classList.remove('hidden');
+    upgradeActions?.classList.add('hidden');
+    noUpdatesMessage?.classList.add('hidden');
+
+    previewContainer.innerHTML = `
+        <div style="color: var(--text-muted); padding: 20px; text-align: center;">
+            <div class="checking-spinner"></div>
+            <p style="margin-top: 10px;">Checking for updates...</p>
+        </div>
+    `;
 
     try {
         const response = await fetch('/api/system/upgrade/check');
         const updates = await response.json();
 
         if (response.ok) {
+            const hasUIUpdates = updates.ui_update_available && updates.ui_commits && updates.ui_commits.length > 0;
+            const hasSystemUpdates = updates.system_updates_available;
+            const hasAnyUpdates = hasUIUpdates || hasSystemUpdates;
+
+            if (!hasAnyUpdates) {
+                // No updates available
+                previewContainer.classList.add('hidden');
+                noUpdatesMessage?.classList.remove('hidden');
+                return;
+            }
+
+            // Build update preview HTML
             let html = '';
 
             // UI Updates section
-            if (updates.ui_update_available && updates.ui_commits && updates.ui_commits.length > 0) {
+            if (hasUIUpdates) {
                 html += `
                     <div class="update-section">
-                        <h4 style="color: var(--accent-primary); margin-bottom: 8px;">&#128230; UI Updates Available</h4>
+                        <h4 style="color: var(--accent-primary); margin-bottom: 8px;">&#128230; UI Updates Available (${updates.ui_commits.length} commits)</h4>
                         <div class="update-list">
                             ${updates.ui_commits.map(c => `
                                 <div class="update-item">
@@ -1473,37 +1508,26 @@ async function checkForUpdates() {
                         </div>
                     </div>
                 `;
-            } else {
-                html += `
-                    <div class="update-section">
-                        <h4 style="color: var(--accent-success); margin-bottom: 8px;">&#9989; UI is up to date</h4>
-                    </div>
-                `;
             }
 
             // System Updates section
-            if (updates.system_updates_available) {
+            if (hasSystemUpdates) {
+                const pkgCount = updates.system_package_count || updates.system_packages.length;
                 html += `
-                    <div class="update-section" style="margin-top: 15px;">
-                        <h4 style="color: var(--accent-primary); margin-bottom: 8px;">&#128421; System Packages (${updates.system_package_count || updates.system_packages.length})</h4>
+                    <div class="update-section" ${hasUIUpdates ? 'style="margin-top: 15px;"' : ''}>
+                        <h4 style="color: var(--accent-primary); margin-bottom: 8px;">&#128421; System Packages (${pkgCount} available)</h4>
                         <div class="update-list">
                             ${updates.system_packages.slice(0, 5).map(pkg => `
                                 <div class="update-item">
                                     <span class="package-name">${pkg}</span>
                                 </div>
                             `).join('')}
-                            ${updates.system_package_count > 5 ? `
+                            ${pkgCount > 5 ? `
                                 <div class="update-item" style="color: var(--text-muted);">
-                                    ... and ${updates.system_package_count - 5} more packages
+                                    ... and ${pkgCount - 5} more packages
                                 </div>
                             ` : ''}
                         </div>
-                    </div>
-                `;
-            } else {
-                html += `
-                    <div class="update-section" style="margin-top: 15px;">
-                        <h4 style="color: var(--accent-success); margin-bottom: 8px;">&#9989; System packages up to date</h4>
                     </div>
                 `;
             }
@@ -1518,26 +1542,34 @@ async function checkForUpdates() {
 
             previewContainer.innerHTML = html;
 
-            // Update button states based on what's available
-            const uiBtn = document.querySelector('[onclick="startUpgrade(\'ui\')"]');
-            const fullBtn = document.querySelector('[onclick="startUpgrade(\'full\')"]');
+            // Show upgrade actions
+            upgradeActions?.classList.remove('hidden');
 
-            if (uiBtn) {
-                if (!updates.ui_update_available) {
-                    uiBtn.disabled = true;
-                    uiBtn.textContent = 'UI UP TO DATE';
-                    uiBtn.classList.add('btn-disabled');
+            // Enable/disable options based on what's available
+            if (uiUpgradeOption) {
+                if (!hasUIUpdates) {
+                    uiUpgradeOption.classList.add('disabled');
+                    uiUpgradeOption.onclick = null;
                 } else {
-                    uiBtn.disabled = false;
-                    uiBtn.textContent = 'UI UPDATE';
-                    uiBtn.classList.remove('btn-disabled');
+                    uiUpgradeOption.classList.remove('disabled');
+                    uiUpgradeOption.onclick = () => startUpgrade('ui');
+                }
+            }
+
+            if (fullUpgradeOption) {
+                if (!hasAnyUpdates) {
+                    fullUpgradeOption.classList.add('disabled');
+                    fullUpgradeOption.onclick = null;
+                } else {
+                    fullUpgradeOption.classList.remove('disabled');
+                    fullUpgradeOption.onclick = () => startUpgrade('full');
                 }
             }
         } else {
-            previewContainer.innerHTML = `<div style="color: var(--accent-danger);">Error checking updates: ${updates.error || 'Unknown error'}</div>`;
+            previewContainer.innerHTML = `<div style="color: var(--accent-danger); padding: 15px;">Error checking updates: ${updates.error || 'Unknown error'}</div>`;
         }
     } catch (error) {
-        previewContainer.innerHTML = `<div style="color: var(--accent-danger);">Failed to check for updates: ${error.message}</div>`;
+        previewContainer.innerHTML = `<div style="color: var(--accent-danger); padding: 15px;">Failed to check for updates: ${error.message}</div>`;
     }
 }
 
@@ -1634,23 +1666,28 @@ function showUpgradeComplete(rebootRequired, upgradeType) {
             <button class="btn btn-warning" onclick="confirmReboot()">REBOOT NOW</button>
             <button class="btn btn-secondary" onclick="closeUpgradeModal()">LATER</button>
         `;
+        addLog('SUCCESS', 'Upgrade completed');
     } else if (upgradeType === 'ui') {
-        // UI-only upgrade - show restart app option
-        msgEl.textContent = 'Restart the application to apply updates.';
-        actionsEl.innerHTML = `
-            <button class="btn btn-primary" onclick="restartApp()">RESTART APP</button>
-            <button class="btn btn-secondary" onclick="closeUpgradeModal()">LATER</button>
-        `;
-    } else {
-        // Full system upgrade, no reboot needed
-        msgEl.textContent = 'All updates applied successfully.';
-        actionsEl.innerHTML = `
-            <button class="btn btn-primary" onclick="restartApp()">RESTART APP</button>
-            <button class="btn btn-secondary" onclick="closeUpgradeModal()">CLOSE</button>
-        `;
-    }
+        // UI-only upgrade - auto-restart the app
+        msgEl.textContent = 'Update complete. Restarting application automatically...';
+        actionsEl.innerHTML = `<p style="color: var(--text-muted);">Please wait...</p>`;
+        addLog('SUCCESS', 'Upgrade completed - auto-restarting...');
 
-    addLog('SUCCESS', 'Upgrade completed');
+        // Auto-restart after a brief delay
+        setTimeout(() => {
+            restartApp();
+        }, 1500);
+    } else {
+        // Full system upgrade, no reboot needed - also auto-restart
+        msgEl.textContent = 'All updates applied. Restarting application...';
+        actionsEl.innerHTML = `<p style="color: var(--text-muted);">Please wait...</p>`;
+        addLog('SUCCESS', 'Upgrade completed - auto-restarting...');
+
+        // Auto-restart after a brief delay
+        setTimeout(() => {
+            restartApp();
+        }, 1500);
+    }
 }
 
 async function restartApp() {

@@ -2327,6 +2327,28 @@ body {
     pointer-events: none;
 }
 
+.upgrade-option.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.upgrade-option.disabled:hover {
+    border-color: var(--border-color);
+    background: rgba(0, 0, 0, 0.3);
+    transform: none;
+}
+
+.checking-spinner {
+    width: 30px;
+    height: 30px;
+    margin: 0 auto;
+    border: 3px solid var(--border-color);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
 /* ==================== RESTART ANIMATION ==================== */
 
 .restart-animation {

@@ -607,38 +607,47 @@
             </div>
             <div class="modal-body">
                 <div id="upgradeInitial">
-                    <p style="margin-bottom: 15px; color: var(--text-secondary);">
-                        Available updates:
-                    </p>
-
-                    <!-- Update Preview -->
+                    <!-- Update Preview - populated by JS -->
                     <div id="upgradePreview" class="upgrade-preview">
-                        <div style="color: var(--text-muted); padding: 10px;">Checking for updates...</div>
-                    </div>
-
-                    <p style="margin: 15px 0 10px; color: var(--text-secondary);">
-                        Choose an upgrade option:
-                    </p>
-
-                    <div class="upgrade-options">
-                        <div class="upgrade-option" onclick="startUpgrade('ui')">
-                            <div class="upgrade-option-icon">&#9889;</div>
-                            <div class="upgrade-option-info">
-                                <h4>UI Only <span class="upgrade-fast">(Fast)</span></h4>
-                                <p>Updates WARHAMMER interface only. Quick restart.</p>
-                            </div>
-                        </div>
-
-                        <div class="upgrade-option" onclick="startUpgrade('full')">
-                            <div class="upgrade-option-icon">&#128187;</div>
-                            <div class="upgrade-option-info">
-                                <h4>Full System</h4>
-                                <p>Updates system packages + WARHAMMER. May require reboot.</p>
-                            </div>
+                        <div style="color: var(--text-muted); padding: 20px; text-align: center;">
+                            <div class="checking-spinner"></div>
+                            <p style="margin-top: 10px;">Checking for updates...</p>
                         </div>
                     </div>
 
-                    <button class="btn btn-secondary" style="width: 100%; margin-top: 15px;" onclick="closeUpgradeModal()">CANCEL</button>
+                    <!-- Upgrade Options - shown only when updates available -->
+                    <div id="upgradeActions" class="hidden">
+                        <p style="margin: 15px 0 10px; color: var(--text-secondary);">
+                            Choose an upgrade option:
+                        </p>
+
+                        <div class="upgrade-options">
+                            <div class="upgrade-option" id="uiUpgradeOption" onclick="startUpgrade('ui')">
+                                <div class="upgrade-option-icon">&#9889;</div>
+                                <div class="upgrade-option-info">
+                                    <h4>UI Only <span class="upgrade-fast">(Fast)</span></h4>
+                                    <p>Updates WARHAMMER interface only. Auto-restarts when done.</p>
+                                </div>
+                            </div>
+
+                            <div class="upgrade-option" id="fullUpgradeOption" onclick="startUpgrade('full')">
+                                <div class="upgrade-option-icon">&#128187;</div>
+                                <div class="upgrade-option-info">
+                                    <h4>Full System</h4>
+                                    <p>Updates system packages + WARHAMMER. May require reboot.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- No Updates Message - shown when everything is up to date -->
+                    <div id="noUpdatesMessage" class="hidden" style="text-align: center; padding: 20px;">
+                        <span style="font-size: 40px;">&#9989;</span>
+                        <h3 style="color: var(--accent-success); margin-top: 10px;">Everything is up to date!</h3>
+                        <p style="color: var(--text-muted); font-size: 12px; margin-top: 10px;">No updates available at this time.</p>
+                    </div>
+
+                    <button class="btn btn-secondary" style="width: 100%; margin-top: 15px;" onclick="closeUpgradeModal()">CLOSE</button>
                 </div>
 
                 <div id="upgradeProgress" class="hidden">
