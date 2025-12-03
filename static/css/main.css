@@ -2272,6 +2272,61 @@ body {
     font-weight: normal;
 }
 
+/* ==================== UPGRADE PREVIEW ==================== */
+
+.upgrade-preview {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 12px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.upgrade-preview .update-section {
+    margin-bottom: 10px;
+}
+
+.upgrade-preview .update-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.upgrade-preview .update-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.upgrade-preview .commit-hash {
+    color: var(--accent-info);
+    font-weight: bold;
+    min-width: 60px;
+}
+
+.upgrade-preview .commit-msg {
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.upgrade-preview .package-name {
+    color: var(--accent-primary);
+}
+
+.btn-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 /* ==================== RESTART ANIMATION ==================== */
 
 .restart-animation {
