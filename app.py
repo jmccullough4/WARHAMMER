@@ -39,6 +39,34 @@ BASE_NETPLAN = os.environ.get('BASE_NETPLAN', '/etc/netplan/01-network-manager-a
 # Interfaces to hide from the UI
 HIDDEN_INTERFACES = ['lo', 'virbr0', 'virbr0-nic', 'docker0']
 
+# Application version - reads from git or defaults
+def get_app_version():
+    """Get application version from git tag or fallback to default"""
+    try:
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        # Try to get version from git describe
+        result = subprocess.run(
+            ['git', 'describe', '--tags', '--always'],
+            cwd=app_dir,
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+
+        # Fallback: get short commit hash
+        result = subprocess.run(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            cwd=app_dir,
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return f"2.2.0-{result.stdout.strip()}"
+    except:
+        pass
+    return "2.2.0"
+
+APP_VERSION = get_app_version()
+
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'warhammer-secret-key-change-in-production')
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
@@ -173,7 +201,7 @@ def login():
         else:
             error = 'Invalid credentials. Access denied.'
 
-    return render_template('login.html', error=error)
+    return render_template('login.html', error=error, version=APP_VERSION)
 
 @app.route('/logout')
 def logout():
@@ -188,7 +216,8 @@ def dashboard():
         username=session.get('username', 'operator'),
         warhammer_domain=WARHAMMER_DOMAIN,
         mapbox_token=MAPBOX_TOKEN,
-        management_ip=MANAGEMENT_INTERFACE_1
+        management_ip=MANAGEMENT_INTERFACE_1,
+        version=APP_VERSION
     )
 
 # ==================== HELPER FUNCTIONS ====================
@@ -384,6 +413,16 @@ def get_warhammer_status():
 def get_gps_location():
     """Get current GPS location from gpsd"""
     return jsonify(gps_cache)
+
+@app.route('/api/version')
+@login_required
+def get_version():
+    """Get application version information"""
+    return jsonify({
+        'version': APP_VERSION,
+        'name': 'WARHAMMER',
+        'description': 'Network Overlay Management System'
+    })
 
 @app.route('/api/warhammer/peers')
 @login_required
