@@ -41,6 +41,104 @@ BASE_NETPLAN = os.environ.get('BASE_NETPLAN', '/etc/netplan/01-network-manager-a
 SUBSCRIPTION_DATA_FILE = os.environ.get('SUBSCRIPTION_DATA_FILE', '/etc/warhammer/subscription.json')
 SUBSCRIPTION_ALERT_THRESHOLDS = [30, 15, 7, 3, 1]  # Days before expiry to show alerts
 
+# ==================== CARRIER APN DATABASE ====================
+# Maps carrier names/patterns to their APN settings
+# Format: { 'pattern': { 'apn': '...', 'username': '...', 'password': '...' } }
+CARRIER_APN_DATABASE = {
+    # Verizon
+    'verizon': {'apn': 'vzwinternet', 'username': '', 'password': ''},
+    'vzw': {'apn': 'vzwinternet', 'username': '', 'password': ''},
+    '311480': {'apn': 'vzwinternet', 'username': '', 'password': ''},  # Verizon MCC-MNC
+
+    # AT&T
+    'at&t': {'apn': 'broadband', 'username': '', 'password': ''},
+    'att': {'apn': 'broadband', 'username': '', 'password': ''},
+    '310410': {'apn': 'broadband', 'username': '', 'password': ''},  # AT&T MCC-MNC
+    '310280': {'apn': 'broadband', 'username': '', 'password': ''},
+
+    # T-Mobile
+    't-mobile': {'apn': 'fast.t-mobile.com', 'username': '', 'password': ''},
+    'tmobile': {'apn': 'fast.t-mobile.com', 'username': '', 'password': ''},
+    '310260': {'apn': 'fast.t-mobile.com', 'username': '', 'password': ''},  # T-Mobile MCC-MNC
+
+    # Sprint (now T-Mobile)
+    'sprint': {'apn': 'fast.t-mobile.com', 'username': '', 'password': ''},
+
+    # US Cellular
+    'us cellular': {'apn': 'usccinternet', 'username': '', 'password': ''},
+    'uscellular': {'apn': 'usccinternet', 'username': '', 'password': ''},
+
+    # FirstNet (AT&T public safety)
+    'firstnet': {'apn': 'firstnet-broadband', 'username': '', 'password': ''},
+
+    # Google Fi
+    'google fi': {'apn': 'h2g2', 'username': '', 'password': ''},
+    'fi': {'apn': 'h2g2', 'username': '', 'password': ''},
+
+    # Mint Mobile (T-Mobile MVNO)
+    'mint': {'apn': 'fast.t-mobile.com', 'username': '', 'password': ''},
+
+    # Visible (Verizon MVNO)
+    'visible': {'apn': 'vsblinternet', 'username': '', 'password': ''},
+
+    # Cricket (AT&T MVNO)
+    'cricket': {'apn': 'ndo', 'username': '', 'password': ''},
+
+    # Metro (T-Mobile MVNO)
+    'metro': {'apn': 'fast.metropcs.com', 'username': '', 'password': ''},
+    'metropcs': {'apn': 'fast.metropcs.com', 'username': '', 'password': ''},
+
+    # Boost (T-Mobile MVNO)
+    'boost': {'apn': 'fast.t-mobile.com', 'username': '', 'password': ''},
+
+    # Consumer Cellular
+    'consumer cellular': {'apn': 'att.mvno', 'username': '', 'password': ''},
+
+    # Tracfone
+    'tracfone': {'apn': 'tfdata', 'username': '', 'password': ''},
+
+    # Simple Mobile
+    'simple mobile': {'apn': 'simple', 'username': '', 'password': ''},
+
+    # Ting
+    'ting': {'apn': 'fast.t-mobile.com', 'username': '', 'password': ''},
+
+    # International carriers
+    'rogers': {'apn': 'internet.com', 'username': '', 'password': ''},
+    'bell': {'apn': 'pda.bell.ca', 'username': '', 'password': ''},
+    'telus': {'apn': 'sp.telus.com', 'username': '', 'password': ''},
+    'vodafone': {'apn': 'web.vodafone.de', 'username': '', 'password': ''},
+    'ee': {'apn': 'everywhere', 'username': '', 'password': ''},
+    'three': {'apn': 'three.co.uk', 'username': '', 'password': ''},
+    'o2': {'apn': 'mobile.o2.co.uk', 'username': 'o2web', 'password': 'password'},
+}
+
+def detect_carrier_apn(operator_name, mcc_mnc=None):
+    """Detect APN settings based on carrier name or MCC-MNC code"""
+    if not operator_name and not mcc_mnc:
+        return None
+
+    # Try MCC-MNC first (most reliable)
+    if mcc_mnc:
+        mcc_mnc_clean = mcc_mnc.replace(' ', '').replace('-', '')
+        if mcc_mnc_clean in CARRIER_APN_DATABASE:
+            return CARRIER_APN_DATABASE[mcc_mnc_clean]
+
+    # Try operator name matching
+    if operator_name:
+        operator_lower = operator_name.lower().strip()
+
+        # Direct match
+        if operator_lower in CARRIER_APN_DATABASE:
+            return CARRIER_APN_DATABASE[operator_lower]
+
+        # Partial match
+        for pattern, apn_info in CARRIER_APN_DATABASE.items():
+            if pattern in operator_lower or operator_lower in pattern:
+                return apn_info
+
+    return None
+
 # ==================== SUBSCRIPTION MANAGEMENT ====================
 
 def get_default_subscription_data():
@@ -518,7 +616,8 @@ def get_cellular_status():
             'rssi': None,
             'imei': None,
             'iccid': None,
-            'phone_number': None
+            'phone_number': None,
+            'suggested_apn': None
         }
 
         # Check if ModemManager is available and get modem list
@@ -641,9 +740,126 @@ def get_cellular_status():
         except subprocess.TimeoutExpired:
             pass
 
+        # Detect suggested APN based on carrier
+        if result['operator']:
+            suggested = detect_carrier_apn(result['operator'])
+            if suggested:
+                result['suggested_apn'] = suggested
+
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e), 'available': False}), 500
+
+@app.route('/api/system/cellular/apn/auto-configure', methods=['POST'])
+@login_required
+def auto_configure_cellular():
+    """Automatically detect carrier and configure APN"""
+    try:
+        # First get cellular status to detect carrier
+        modem_list = subprocess.run(
+            ['mmcli', '-L'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if modem_list.returncode != 0 or 'No modems' in modem_list.stdout:
+            return jsonify({'error': 'No modem detected'}), 400
+
+        import re
+        modem_match = re.search(r'/Modem/(\d+)', modem_list.stdout)
+        if not modem_match:
+            return jsonify({'error': 'Could not identify modem'}), 400
+
+        modem_num = modem_match.group(1)
+
+        # Get modem info
+        modem_info = subprocess.run(
+            ['mmcli', '-m', modem_num],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        operator = None
+        if modem_info.returncode == 0:
+            operator_match = re.search(r'operator name:\s*[\'"]?([^\'"\n]+)[\'"]?', modem_info.stdout, re.IGNORECASE)
+            if operator_match:
+                operator = operator_match.group(1).strip()
+
+        if not operator:
+            return jsonify({'error': 'Could not detect carrier. Please configure manually.'}), 400
+
+        # Detect APN
+        apn_info = detect_carrier_apn(operator)
+        if not apn_info:
+            return jsonify({
+                'error': f'Unknown carrier: {operator}. Please configure APN manually.',
+                'detected_carrier': operator
+            }), 400
+
+        # Create/update the connection
+        connection_name = 'WARHAMMER-Mobile'
+
+        # Check if connection exists
+        check_conn = subprocess.run(
+            ['nmcli', 'connection', 'show', connection_name],
+            capture_output=True,
+            text=True
+        )
+
+        if check_conn.returncode == 0:
+            # Update existing
+            cmd = ['sudo', 'nmcli', 'connection', 'modify', connection_name,
+                   'gsm.apn', apn_info['apn'],
+                   'connection.autoconnect', 'yes']
+            if apn_info.get('username'):
+                cmd.extend(['gsm.username', apn_info['username']])
+            if apn_info.get('password'):
+                cmd.extend(['gsm.password', apn_info['password']])
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            action = 'updated'
+        else:
+            # Create new
+            cmd = ['sudo', 'nmcli', 'connection', 'add',
+                   'type', 'gsm',
+                   'ifname', '*',
+                   'con-name', connection_name,
+                   'gsm.apn', apn_info['apn'],
+                   'connection.autoconnect', 'yes']
+            if apn_info.get('username'):
+                cmd.extend(['gsm.username', apn_info['username']])
+            if apn_info.get('password'):
+                cmd.extend(['gsm.password', apn_info['password']])
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            action = 'created'
+
+        if result.returncode != 0:
+            return jsonify({'error': f'Failed to configure: {result.stderr}'}), 500
+
+        # Activate the connection
+        activate = subprocess.run(
+            ['sudo', 'nmcli', 'connection', 'up', connection_name],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        return jsonify({
+            'success': True,
+            'carrier': operator,
+            'apn': apn_info['apn'],
+            'action': action,
+            'activated': activate.returncode == 0,
+            'message': f'Detected {operator}, configured APN: {apn_info["apn"]}'
+        })
+
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Operation timed out'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/system/cellular/apn')
 @login_required

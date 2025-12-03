@@ -1250,10 +1250,109 @@ function showSettingsTab(tab) {
     // Load APN settings when Network tab is shown
     if (tab === 'network') {
         loadApnSettings();
+        loadCarrierDetection();
     }
 }
 
 // ==================== APN/CELLULAR MANAGEMENT ====================
+
+async function loadCarrierDetection() {
+    const infoEl = document.getElementById('autoConfigInfo');
+    const btnEl = document.getElementById('autoConfigBtn');
+
+    try {
+        const response = await fetch('/api/system/cellular');
+        const data = await response.json();
+
+        if (!data.available) {
+            infoEl.innerHTML = '<span style="color: var(--text-muted);">No modem detected</span>';
+            btnEl.disabled = true;
+            btnEl.style.opacity = '0.5';
+            return;
+        }
+
+        let html = '<div class="carrier-detection">';
+
+        if (data.operator) {
+            html += `<div class="carrier-name"><strong>Detected Carrier:</strong> ${data.operator}</div>`;
+
+            if (data.suggested_apn) {
+                html += `<div class="suggested-apn" style="color: var(--accent-success); margin-top: 5px;">
+                    <strong>Recommended APN:</strong> ${data.suggested_apn.apn}
+                </div>`;
+                btnEl.disabled = false;
+                btnEl.style.opacity = '1';
+            } else {
+                html += `<div style="color: var(--accent-warning); margin-top: 5px;">
+                    Unknown carrier - please configure APN manually
+                </div>`;
+                btnEl.disabled = true;
+                btnEl.style.opacity = '0.5';
+            }
+        } else {
+            html += '<span style="color: var(--text-muted);">Waiting for carrier registration...</span>';
+            btnEl.disabled = true;
+            btnEl.style.opacity = '0.5';
+        }
+
+        html += '</div>';
+        infoEl.innerHTML = html;
+
+    } catch (error) {
+        infoEl.innerHTML = `<span style="color: var(--accent-danger);">Error: ${error.message}</span>`;
+        btnEl.disabled = true;
+    }
+}
+
+async function autoConfigureApn() {
+    const btnEl = document.getElementById('autoConfigBtn');
+    const infoEl = document.getElementById('autoConfigInfo');
+
+    btnEl.disabled = true;
+    btnEl.innerHTML = '&#8987; CONFIGURING...';
+
+    try {
+        const response = await fetch('/api/system/cellular/apn/auto-configure', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            infoEl.innerHTML = `<div style="color: var(--accent-danger);">${result.error}</div>`;
+            btnEl.innerHTML = '&#9889; AUTO-CONFIGURE';
+            btnEl.disabled = false;
+            return;
+        }
+
+        infoEl.innerHTML = `
+            <div style="color: var(--accent-success);">
+                <strong>&#10004; ${result.message}</strong>
+                ${result.activated ? '<br><span style="font-size: 11px;">Connection activated!</span>' : ''}
+            </div>`;
+
+        btnEl.innerHTML = '&#10004; CONFIGURED';
+
+        // Reload connections list
+        loadApnSettings();
+
+        // Refresh cellular indicator
+        setTimeout(fetchCellularStatus, 3000);
+
+        // Reset button after delay
+        setTimeout(() => {
+            btnEl.innerHTML = '&#9889; AUTO-CONFIGURE';
+            btnEl.disabled = false;
+            loadCarrierDetection();
+        }, 5000);
+
+    } catch (error) {
+        infoEl.innerHTML = `<div style="color: var(--accent-danger);">Failed: ${error.message}</div>`;
+        btnEl.innerHTML = '&#9889; AUTO-CONFIGURE';
+        btnEl.disabled = false;
+    }
+}
 
 async function loadApnSettings() {
     const container = document.getElementById('apnConnectionsList');

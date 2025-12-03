@@ -3274,3 +3274,42 @@ body {
     outline: none;
     border-color: var(--accent-primary);
 }
+
+/* Auto-configure section */
+.apn-auto-config {
+    background: rgba(255, 107, 53, 0.1);
+    border: 1px solid var(--accent-primary);
+    border-radius: 6px;
+    padding: 15px;
+    margin-bottom: 10px;
+}
+
+.auto-config-info {
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.auto-config-info .detecting {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.carrier-detection .carrier-name {
+    font-size: 14px;
+}
+
+.carrier-detection .suggested-apn {
+    font-size: 12px;
+}
+
+#autoConfigBtn {
+    width: 100%;
+    padding: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+#autoConfigBtn:disabled {
+    cursor: not-allowed;
+}
