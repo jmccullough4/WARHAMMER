@@ -345,6 +345,41 @@ def gps_polling_thread():
 gps_thread = threading.Thread(target=gps_polling_thread, daemon=True)
 gps_thread.start()
 
+# Start background token sync scheduler (runs at midnight UTC daily)
+def token_sync_scheduler():
+    """Background thread to sync token expiry daily at midnight UTC"""
+    from datetime import timezone
+
+    # Initial sync on startup (after a short delay)
+    time.sleep(10)
+    print("[TOKEN SYNC] Running initial token expiry sync...")
+    sync_token_expiry()
+
+    while True:
+        try:
+            # Calculate seconds until next midnight UTC
+            now_utc = datetime.now(timezone.utc)
+            tomorrow_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            seconds_until_midnight = (tomorrow_utc - now_utc).total_seconds()
+
+            print(f"[TOKEN SYNC] Next sync scheduled in {seconds_until_midnight:.0f} seconds (midnight UTC)")
+            time.sleep(seconds_until_midnight)
+
+            # Run the sync
+            print("[TOKEN SYNC] Running scheduled token expiry sync...")
+            result = sync_token_expiry()
+            if result.get('success'):
+                print(f"[TOKEN SYNC] Sync successful: {result['token_info'].get('name')} expires {result['token_info'].get('expiration_date')}")
+            else:
+                print(f"[TOKEN SYNC] Sync failed: {result.get('error')}")
+
+        except Exception as e:
+            print(f"[TOKEN SYNC] Scheduler error: {e}")
+            time.sleep(3600)  # Wait an hour before retrying on error
+
+token_sync_thread = threading.Thread(target=token_sync_scheduler, daemon=True)
+token_sync_thread.start()
+
 # ==================== AUTHENTICATION ====================
 
 def login_required(f):
@@ -372,6 +407,10 @@ def login():
             session['logged_in'] = True
             session['username'] = username
             session.permanent = True
+
+            # Trigger token sync in background on login
+            threading.Thread(target=sync_token_expiry, daemon=True).start()
+
             return redirect(url_for('dashboard'))
         else:
             error = 'Invalid credentials. Access denied.'
@@ -771,75 +810,59 @@ def api_subscription_configure():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/subscription/fetch-token-expiry')
-@login_required
-def api_fetch_token_expiry():
-    """Fetch token expiry from WARHAMMER management server API"""
-    try:
-        if not WARHAMMER_TOKEN:
-            return jsonify({'error': 'Management token not configured'}), 400
+def sync_token_expiry():
+    """Sync token expiry from management server API (internal function)
 
-        # Try to get current user info (works for regular users)
-        user_response = requests.get(
-            f'https://{WARHAMMER_DOMAIN}/api/users/current',
+    Returns dict with 'success', 'token_info', or 'error' keys
+    """
+    if not WARHAMMER_TOKEN:
+        return {'error': 'Management token not configured'}
+
+    try:
+        # For Service Users, query the service users list directly
+        users_response = requests.get(
+            f'https://{WARHAMMER_DOMAIN}/api/users?service_user=true',
             headers=get_api_headers(),
             timeout=10
         )
 
-        user_id = None
-        is_service_user = False
+        if users_response.status_code != 200:
+            return {'error': f'Failed to query service users: {users_response.status_code}'}
 
-        if user_response.status_code == 200:
-            user_data = user_response.json()
-            user_id = user_data.get('id')
-            is_service_user = user_data.get('is_service_user', False)
-        elif user_response.status_code in [401, 403]:
-            # Service user tokens may not have access to /users/current
-            # Try to find the service user by listing all users
-            users_response = requests.get(
-                f'https://{WARHAMMER_DOMAIN}/api/users?service_user=true',
+        users = users_response.json()
+        if not users:
+            return {'error': 'No service users found'}
+
+        # Iterate through service users and find tokens
+        all_tokens = []
+        for user in users:
+            user_id = user.get('id')
+            if not user_id:
+                continue
+
+            tokens_response = requests.get(
+                f'https://{WARHAMMER_DOMAIN}/api/users/{user_id}/tokens',
                 headers=get_api_headers(),
                 timeout=10
             )
-            if users_response.status_code == 200:
-                users = users_response.json()
-                # Find the user that matches our token (by checking each user's tokens)
-                for user in users:
-                    if user.get('is_service_user'):
-                        user_id = user.get('id')
-                        is_service_user = True
-                        break
 
-        if not user_id:
-            return jsonify({
-                'error': 'Cannot determine user ID. Service User tokens may have limited API access.',
-                'hint': 'Please manually enter the token expiry date in the configuration form.'
-            }), 403
+            if tokens_response.status_code == 200:
+                tokens = tokens_response.json()
+                for token in tokens:
+                    token['user_id'] = user_id
+                    token['user_name'] = user.get('name', 'Unknown')
+                    all_tokens.append(token)
 
-        # Now get tokens for this user
-        tokens_response = requests.get(
-            f'https://{WARHAMMER_DOMAIN}/api/users/{user_id}/tokens',
-            headers=get_api_headers(),
-            timeout=10
-        )
+        if not all_tokens:
+            return {'error': 'No tokens found for any service user'}
 
-        if tokens_response.status_code != 200:
-            return jsonify({'error': 'Failed to get tokens from management server'}), tokens_response.status_code
-
-        tokens = tokens_response.json()
-
-        # Find the token with the nearest expiry (or the one currently in use)
-        if not tokens:
-            return jsonify({'error': 'No tokens found for user'}), 404
-
-        # Get the token with the soonest expiration
+        # Find the token with the soonest expiration (most relevant)
         earliest_expiry = None
         token_info = None
 
-        for token in tokens:
+        for token in all_tokens:
             expiry = token.get('expiration_date')
             if expiry:
-                # Parse ISO format date
                 try:
                     expiry_date = datetime.fromisoformat(expiry.replace('Z', '+00:00'))
                     if earliest_expiry is None or expiry_date < earliest_expiry:
@@ -848,10 +871,11 @@ def api_fetch_token_expiry():
                             'name': token.get('name'),
                             'expiration_date': expiry_date.strftime('%Y-%m-%d'),
                             'created_at': token.get('created_at'),
-                            'last_used': token.get('last_used')
+                            'last_used': token.get('last_used'),
+                            'user_name': token.get('user_name')
                         }
-                except:
-                    pass
+                except Exception as e:
+                    print(f"Error parsing token expiry: {e}")
 
         if token_info:
             # Auto-update the stored token expiry
@@ -861,18 +885,30 @@ def api_fetch_token_expiry():
             data['netbird_token']['token_name'] = token_info.get('name')
             save_subscription_data(data)
 
-            return jsonify({
-                'status': 'success',
-                'token': token_info,
-                'subscription_status': get_subscription_status()
-            })
+            print(f"[TOKEN SYNC] Token expiry synced: {token_info['name']} expires {token_info['expiration_date']}")
+            return {'success': True, 'token_info': token_info}
         else:
-            return jsonify({'error': 'No valid token expiry found'}), 404
+            return {'error': 'No valid token expiry found'}
 
     except requests.exceptions.Timeout:
-        return jsonify({'error': 'Request timeout'}), 504
+        return {'error': 'Request timeout'}
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return {'error': str(e)}
+
+@app.route('/api/subscription/fetch-token-expiry')
+@login_required
+def api_fetch_token_expiry():
+    """Fetch token expiry from WARHAMMER management server API"""
+    result = sync_token_expiry()
+
+    if result.get('success'):
+        return jsonify({
+            'status': 'success',
+            'token': result['token_info'],
+            'subscription_status': get_subscription_status()
+        })
+    else:
+        return jsonify({'error': result.get('error', 'Unknown error')}), 400
 
 @app.route('/api/warhammer/peers')
 @login_required
