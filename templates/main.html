@@ -510,19 +510,29 @@
             </div>
             <div class="modal-body">
                 <div id="upgradeInitial">
-                    <p style="margin-bottom: 15px; color: var(--text-secondary);">
-                        This will update system packages and check for WARHAMMER application updates.
+                    <p style="margin-bottom: 20px; color: var(--text-secondary);">
+                        Choose an upgrade option:
                     </p>
-                    <ul style="margin-bottom: 20px; font-size: 12px; color: var(--text-muted); list-style: none;">
-                        <li>&#8226; Updates apt package lists</li>
-                        <li>&#8226; Upgrades installed packages</li>
-                        <li>&#8226; Pulls latest WARHAMMER code (if git repo)</li>
-                        <li>&#8226; Cleans up unused packages</li>
-                    </ul>
-                    <div class="btn-group">
-                        <button class="btn btn-primary" onclick="startUpgrade()">START UPGRADE</button>
-                        <button class="btn btn-secondary" onclick="closeUpgradeModal()">CANCEL</button>
+
+                    <div class="upgrade-options">
+                        <div class="upgrade-option" onclick="startUpgrade('ui')">
+                            <div class="upgrade-option-icon">&#9889;</div>
+                            <div class="upgrade-option-info">
+                                <h4>UI Only <span class="upgrade-fast">(Fast)</span></h4>
+                                <p>Updates WARHAMMER interface only. Quick restart.</p>
+                            </div>
+                        </div>
+
+                        <div class="upgrade-option" onclick="startUpgrade('full')">
+                            <div class="upgrade-option-icon">&#128187;</div>
+                            <div class="upgrade-option-info">
+                                <h4>Full System</h4>
+                                <p>Updates system packages + WARHAMMER. May require reboot.</p>
+                            </div>
+                        </div>
                     </div>
+
+                    <button class="btn btn-secondary" style="width: 100%; margin-top: 15px;" onclick="closeUpgradeModal()">CANCEL</button>
                 </div>
 
                 <div id="upgradeProgress" class="hidden">
@@ -539,10 +549,10 @@
                     <div style="text-align: center; margin-bottom: 15px;">
                         <span style="font-size: 40px;">&#9989;</span>
                         <h3 style="color: var(--accent-success); margin-top: 10px;">Upgrade Complete</h3>
+                        <p id="upgradeCompleteMsg" style="color: var(--text-muted); font-size: 12px; margin-top: 10px;"></p>
                     </div>
-                    <div class="upgrade-complete-actions">
-                        <button class="btn btn-warning" onclick="confirmReboot()">REBOOT NOW</button>
-                        <button class="btn btn-secondary" onclick="closeUpgradeModal()">CLOSE</button>
+                    <div class="upgrade-complete-actions" id="upgradeCompleteActions">
+                        <!-- Dynamically populated based on reboot required -->
                     </div>
                 </div>
 
@@ -557,7 +567,100 @@
                         <button class="btn btn-secondary" onclick="closeUpgradeModal()">CLOSE</button>
                     </div>
                 </div>
+
+                <div id="upgradeRestarting" class="hidden">
+                    <div class="restart-animation">
+                        <div class="restart-spinner"></div>
+                        <h3>System Restarting</h3>
+                        <p>Please wait while the application restarts...</p>
+                        <div class="restart-dots">
+                            <span></span><span></span><span></span>
+                        </div>
+                    </div>
+                </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Speedtest Modal -->
+    <div id="speedtestModal" class="modal hidden">
+        <div class="modal-content speedtest-modal">
+            <div class="modal-header">
+                <span>&#128640; NETWORK SPEEDTEST</span>
+                <button class="modal-close" onclick="closeSpeedtestModal()" id="speedtestModalClose">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="speedtest-target" id="speedtestTarget">
+                    Testing connection to: <span id="speedtestTargetIP">--</span>
+                </div>
+
+                <div class="speedtest-gauges">
+                    <div class="speedtest-gauge">
+                        <div class="speedtest-gauge-circle" id="downloadGauge">
+                            <svg viewBox="0 0 120 120">
+                                <circle class="gauge-bg" cx="60" cy="60" r="54"/>
+                                <circle class="gauge-fill download" cx="60" cy="60" r="54" id="downloadGaugeFill"/>
+                            </svg>
+                            <div class="speedtest-gauge-value" id="downloadSpeed">0</div>
+                            <div class="speedtest-gauge-unit">Mbps</div>
+                        </div>
+                        <div class="speedtest-gauge-label">&#8595; DOWNLOAD</div>
+                    </div>
+
+                    <div class="speedtest-gauge">
+                        <div class="speedtest-gauge-circle" id="uploadGauge">
+                            <svg viewBox="0 0 120 120">
+                                <circle class="gauge-bg" cx="60" cy="60" r="54"/>
+                                <circle class="gauge-fill upload" cx="60" cy="60" r="54" id="uploadGaugeFill"/>
+                            </svg>
+                            <div class="speedtest-gauge-value" id="uploadSpeed">0</div>
+                            <div class="speedtest-gauge-unit">Mbps</div>
+                        </div>
+                        <div class="speedtest-gauge-label">&#8593; UPLOAD</div>
+                    </div>
+                </div>
+
+                <div class="speedtest-progress">
+                    <div class="speedtest-progress-bar">
+                        <div class="speedtest-progress-fill" id="speedtestProgressFill"></div>
+                    </div>
+                    <div class="speedtest-status" id="speedtestStatus">Initializing...</div>
+                </div>
+
+                <div class="speedtest-results hidden" id="speedtestResults">
+                    <div class="speedtest-result-row">
+                        <span class="result-label">Data Transferred:</span>
+                        <span class="result-value" id="resultDataTransferred">--</span>
+                    </div>
+                    <div class="speedtest-result-row">
+                        <span class="result-label">Retransmits:</span>
+                        <span class="result-value" id="resultRetransmits">--</span>
+                    </div>
+                    <div class="speedtest-result-row">
+                        <span class="result-label">Test Duration:</span>
+                        <span class="result-value">10 seconds</span>
+                    </div>
+                </div>
+
+                <div class="speedtest-error hidden" id="speedtestError">
+                    <span style="color: var(--accent-danger);">&#10060;</span>
+                    <span id="speedtestErrorMsg"></span>
+                </div>
+
+                <div class="btn-group" style="margin-top: 20px;">
+                    <button class="btn btn-secondary" onclick="closeSpeedtestModal()">CLOSE</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Peer Context Menu -->
+    <div id="peerContextMenu" class="context-menu hidden">
+        <div class="context-menu-item" onclick="runSpeedtest()">
+            <span>&#128640;</span> Run Speedtest
+        </div>
+        <div class="context-menu-item" onclick="showPeerDetailsFromContext()">
+            <span>&#128269;</span> View Details
         </div>
     </div>
 
