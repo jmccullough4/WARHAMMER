@@ -268,6 +268,10 @@ gps_cache = {
     'error': None
 }
 
+# Peer GPS cache - stores GPS data received from other WARHAMMER peers
+peer_gps_cache = {}  # {peer_ip: {'latitude': x, 'longitude': y, 'timestamp': t, 'hostname': name}}
+PEER_GPS_TIMEOUT = 300  # 5 minutes - GPS data older than this is considered stale
+
 def get_gpsd_data():
     """Fetch GPS data from gpsd daemon"""
     global gps_cache
@@ -585,6 +589,73 @@ def get_gps_location():
     """Get current GPS location from gpsd"""
     return jsonify(gps_cache)
 
+# ==================== PEER GPS SHARING ====================
+
+@app.route('/api/peer/gps')
+def get_peer_gps():
+    """Public endpoint for other WARHAMMER peers to fetch this node's GPS location.
+    No authentication required so peers can discover each other's locations."""
+    if gps_cache.get('latitude') and gps_cache.get('longitude'):
+        return jsonify({
+            'hostname': WARHAMMER_NAME,
+            'latitude': gps_cache['latitude'],
+            'longitude': gps_cache['longitude'],
+            'altitude': gps_cache.get('altitude'),
+            'heading': gps_cache.get('heading'),
+            'speed': gps_cache.get('speed'),
+            'timestamp': gps_cache.get('timestamp'),
+            'fix_type': gps_cache.get('fix_type', 0)
+        })
+    else:
+        return jsonify({'error': 'No GPS fix available'}), 404
+
+@app.route('/api/peer/gps/registry')
+@login_required
+def get_peer_gps_registry():
+    """Get all known peer GPS locations from cache"""
+    # Clean up stale entries
+    current_time = time.time()
+    valid_peers = {}
+    for ip, data in peer_gps_cache.items():
+        if current_time - data.get('timestamp', 0) < PEER_GPS_TIMEOUT:
+            valid_peers[ip] = data
+    return jsonify(valid_peers)
+
+def fetch_peer_gps(peer_ip, port=8080):
+    """Fetch GPS data from a peer's WARHAMMER instance"""
+    global peer_gps_cache
+    try:
+        response = requests.get(
+            f'http://{peer_ip}:{port}/api/peer/gps',
+            timeout=2
+        )
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('latitude') and data.get('longitude'):
+                peer_gps_cache[peer_ip] = {
+                    'latitude': data['latitude'],
+                    'longitude': data['longitude'],
+                    'altitude': data.get('altitude'),
+                    'heading': data.get('heading'),
+                    'speed': data.get('speed'),
+                    'hostname': data.get('hostname'),
+                    'timestamp': time.time()
+                }
+                return peer_gps_cache[peer_ip]
+    except:
+        pass
+    return None
+
+def fetch_all_peer_gps(peers, port=8080):
+    """Fetch GPS from all connected peers in parallel"""
+    import concurrent.futures
+
+    connected_peers = [p for p in peers if p.get('connected') and p.get('ip')]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(fetch_peer_gps, p['ip'], port): p['ip'] for p in connected_peers}
+        concurrent.futures.wait(futures, timeout=5)
+
 @app.route('/api/version')
 @login_required
 def get_version():
@@ -708,21 +779,42 @@ def api_fetch_token_expiry():
         if not WARHAMMER_TOKEN:
             return jsonify({'error': 'Management token not configured'}), 400
 
-        # First get current user info
+        # Try to get current user info (works for regular users)
         user_response = requests.get(
             f'https://{WARHAMMER_DOMAIN}/api/users/current',
             headers=get_api_headers(),
             timeout=10
         )
 
-        if user_response.status_code != 200:
-            return jsonify({'error': 'Failed to get user info from management server'}), user_response.status_code
+        user_id = None
+        is_service_user = False
 
-        user_data = user_response.json()
-        user_id = user_data.get('id')
+        if user_response.status_code == 200:
+            user_data = user_response.json()
+            user_id = user_data.get('id')
+            is_service_user = user_data.get('is_service_user', False)
+        elif user_response.status_code in [401, 403]:
+            # Service user tokens may not have access to /users/current
+            # Try to find the service user by listing all users
+            users_response = requests.get(
+                f'https://{WARHAMMER_DOMAIN}/api/users?service_user=true',
+                headers=get_api_headers(),
+                timeout=10
+            )
+            if users_response.status_code == 200:
+                users = users_response.json()
+                # Find the user that matches our token (by checking each user's tokens)
+                for user in users:
+                    if user.get('is_service_user'):
+                        user_id = user.get('id')
+                        is_service_user = True
+                        break
 
         if not user_id:
-            return jsonify({'error': 'Could not determine user ID'}), 400
+            return jsonify({
+                'error': 'Cannot determine user ID. Service User tokens may have limited API access.',
+                'hint': 'Please manually enter the token expiry date in the configuration form.'
+            }), 403
 
         # Now get tokens for this user
         tokens_response = requests.get(
@@ -799,13 +891,38 @@ def get_warhammer_peers():
 
         if response.status_code == 200:
             peers = response.json()
-            # Enrich peers with latency data from cache
+
+            # Fetch GPS from connected peers in background thread
+            connected_peers = [p for p in peers if p.get('connected') and p.get('ip')]
+            if connected_peers:
+                # Spawn background thread to fetch peer GPS (non-blocking)
+                threading.Thread(
+                    target=fetch_all_peer_gps,
+                    args=(connected_peers,),
+                    daemon=True
+                ).start()
+
+            # Enrich peers with cached data
             for peer in peers:
                 peer_ip = peer.get('ip', '')
+                # Add latency data from cache
                 if peer_ip in peer_latency_cache:
                     peer['latency'] = peer_latency_cache[peer_ip]
                 if peer_ip in latency_history:
                     peer['latency_history'] = latency_history[peer_ip]
+                # Add GPS data from peer GPS cache
+                if peer_ip in peer_gps_cache:
+                    gps_data = peer_gps_cache[peer_ip]
+                    # Only include if not stale
+                    if time.time() - gps_data.get('timestamp', 0) < PEER_GPS_TIMEOUT:
+                        peer['gps'] = {
+                            'latitude': gps_data.get('latitude'),
+                            'longitude': gps_data.get('longitude'),
+                            'altitude': gps_data.get('altitude'),
+                            'heading': gps_data.get('heading'),
+                            'speed': gps_data.get('speed'),
+                            'hostname': gps_data.get('hostname')
+                        }
             return jsonify(peers)
         else:
             return jsonify({'error': f'API error: {response.status_code}'}), response.status_code
@@ -1327,6 +1444,73 @@ def run_upgrade_task(upgrade_type='full'):
         upgrade_status['log'].append(f'[ERROR] {str(e)}')
         socketio.emit('upgrade_progress', upgrade_status)
 
+@app.route('/api/system/upgrade/check')
+@login_required
+def check_for_updates():
+    """Check for available updates without applying them"""
+    try:
+        updates = {
+            'ui_update_available': False,
+            'system_updates_available': False,
+            'ui_commits': [],
+            'system_packages': [],
+            'current_version': APP_VERSION
+        }
+
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Check for UI updates (git)
+        if os.path.exists(os.path.join(app_dir, '.git')):
+            # Fetch latest from remote
+            subprocess.run(
+                ['git', 'fetch', 'origin'],
+                cwd=app_dir, capture_output=True, timeout=30
+            )
+
+            # Check for new commits
+            result = subprocess.run(
+                ['git', 'log', 'HEAD..origin/main', '--oneline', '--no-decorate'],
+                cwd=app_dir, capture_output=True, text=True, timeout=10
+            )
+
+            if result.returncode == 0 and result.stdout.strip():
+                commits = result.stdout.strip().split('\n')
+                updates['ui_update_available'] = True
+                updates['ui_commits'] = [{'hash': c.split()[0], 'message': ' '.join(c.split()[1:])} for c in commits if c]
+
+            # Get current branch
+            branch_result = subprocess.run(
+                ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                cwd=app_dir, capture_output=True, text=True, timeout=5
+            )
+            if branch_result.returncode == 0:
+                updates['current_branch'] = branch_result.stdout.strip()
+
+        # Check for system updates (apt)
+        try:
+            # Update package lists quietly
+            subprocess.run(['sudo', 'apt', 'update', '-qq'], capture_output=True, timeout=60)
+
+            # Check upgradable packages
+            result = subprocess.run(
+                ['apt', 'list', '--upgradable'],
+                capture_output=True, text=True, timeout=30
+            )
+
+            if result.returncode == 0:
+                lines = [l for l in result.stdout.strip().split('\n') if '/' in l]
+                if lines:
+                    updates['system_updates_available'] = True
+                    updates['system_packages'] = [l.split('/')[0] for l in lines[:10]]  # Limit to 10
+                    updates['system_package_count'] = len(lines)
+        except:
+            pass
+
+        return jsonify(updates)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/system/upgrade', methods=['POST'])
 @login_required
 def start_system_upgrade():
@@ -1410,89 +1594,96 @@ iperf_status = {
 }
 
 def run_iperf_test(target_ip):
-    """Run iperf3 test against target peer"""
+    """Run iperf3 test against target peer with live updates"""
     global iperf_status
+    import re
+
     iperf_status = {
         'running': True,
         'target': target_ip,
         'results': [],
         'final': None,
-        'error': None
+        'error': None,
+        'phase': 'download'  # Track download vs upload phase
     }
 
     try:
-        # Run iperf3 client with JSON output, 10 second test
+        # Run iperf3 with 1-second interval reports for live updates
+        # Use -f m for Mbits format, -i 1 for 1-second intervals
         process = subprocess.Popen(
-            ['iperf3', '-c', target_ip, '-t', '10', '-J', '--forceflush'],
+            ['iperf3', '-c', target_ip, '-t', '10', '-i', '1', '-f', 'm'],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            bufsize=1  # Line buffered
         )
 
-        # Read output incrementally
-        output_buffer = ''
-        while True:
-            chunk = process.stdout.read(1024)
-            if not chunk and process.poll() is not None:
-                break
-            output_buffer += chunk
+        download_total = 0
+        upload_total = 0
+        download_count = 0
+        upload_count = 0
+        in_reverse = False  # Track if we're in upload (reverse) phase
 
-            # Try to emit intermediate results
-            try:
-                partial = json.loads(output_buffer + ']}')
-                if 'intervals' in partial:
-                    for interval in partial['intervals']:
-                        if 'streams' in interval:
-                            for stream in interval['streams']:
-                                result = {
-                                    'seconds': stream.get('end', 0),
-                                    'bytes': stream.get('bytes', 0),
-                                    'bits_per_second': stream.get('bits_per_second', 0),
-                                    'retransmits': stream.get('retransmits', 0)
-                                }
-                                if result not in iperf_status['results']:
-                                    iperf_status['results'].append(result)
-                                    socketio.emit('iperf_progress', iperf_status)
-            except:
-                pass
+        # Read output line by line for live updates
+        for line in process.stdout:
+            line = line.strip()
+
+            # Check for reverse (upload) phase indicator
+            if 'Reverse mode' in line or 'receiver' in line.lower():
+                in_reverse = True
+                iperf_status['phase'] = 'upload'
+
+            # Parse interval result lines (format: "[  5]   0.00-1.00   sec  XX.X MBytes  XXX Mbits/sec")
+            match = re.search(r'\[\s*\d+\]\s+[\d.]+-[\d.]+\s+sec\s+([\d.]+)\s+MBytes\s+([\d.]+)\s+Mbits/sec', line)
+            if match:
+                mbytes = float(match.group(1))
+                mbps = float(match.group(2))
+
+                result = {
+                    'seconds': len(iperf_status['results']) + 1,
+                    'bytes': int(mbytes * 1024 * 1024),
+                    'bits_per_second': mbps * 1000000,
+                    'phase': 'upload' if in_reverse else 'download'
+                }
+
+                iperf_status['results'].append(result)
+
+                # Track totals for final calculation
+                if in_reverse:
+                    upload_total += mbps
+                    upload_count += 1
+                else:
+                    download_total += mbps
+                    download_count += 1
+
+                # Emit live update
+                socketio.emit('iperf_progress', iperf_status)
+
+            # Check for sender/receiver summary lines
+            sender_match = re.search(r'sender\s*$', line)
+            receiver_match = re.search(r'receiver\s*$', line)
 
         # Wait for completion
         process.wait(timeout=15)
 
-        # Parse final JSON output
-        try:
-            full_result = json.loads(output_buffer)
-            if 'end' in full_result:
-                end = full_result['end']
-                if 'sum_sent' in end:
-                    iperf_status['final'] = {
-                        'sent': {
-                            'bytes': end['sum_sent'].get('bytes', 0),
-                            'bits_per_second': end['sum_sent'].get('bits_per_second', 0),
-                            'retransmits': end['sum_sent'].get('retransmits', 0)
-                        },
-                        'received': {
-                            'bytes': end.get('sum_received', {}).get('bytes', 0),
-                            'bits_per_second': end.get('sum_received', {}).get('bits_per_second', 0)
-                        }
-                    }
-                elif 'streams' in end:
-                    # Fallback for different iperf3 versions
-                    stream = end['streams'][0] if end['streams'] else {}
-                    iperf_status['final'] = {
-                        'sent': {
-                            'bytes': stream.get('sender', {}).get('bytes', 0),
-                            'bits_per_second': stream.get('sender', {}).get('bits_per_second', 0)
-                        },
-                        'received': {
-                            'bytes': stream.get('receiver', {}).get('bytes', 0),
-                            'bits_per_second': stream.get('receiver', {}).get('bits_per_second', 0)
-                        }
-                    }
-        except json.JSONDecodeError:
-            iperf_status['error'] = 'Failed to parse iperf3 output'
+        # Calculate final averages
+        avg_download = (download_total / download_count) if download_count > 0 else 0
+        avg_upload = (upload_total / upload_count) if upload_count > 0 else 0
+
+        iperf_status['final'] = {
+            'sent': {
+                'bytes': int(upload_total * 1024 * 1024 / 8) if upload_count > 0 else 0,
+                'bits_per_second': avg_upload * 1000000,
+                'retransmits': 0
+            },
+            'received': {
+                'bytes': int(download_total * 1024 * 1024 / 8) if download_count > 0 else 0,
+                'bits_per_second': avg_download * 1000000
+            }
+        }
 
         iperf_status['running'] = False
+        iperf_status['phase'] = 'complete'
         socketio.emit('iperf_complete', iperf_status)
 
     except subprocess.TimeoutExpired:

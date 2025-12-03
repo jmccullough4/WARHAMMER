@@ -1431,7 +1431,7 @@ document.addEventListener('keydown', (e) => {
 let upgradePollingInterval = null;
 let currentUpgradeType = null;
 
-function openUpgradeModal() {
+async function openUpgradeModal() {
     document.getElementById('upgradeModal').classList.remove('hidden');
     document.getElementById('upgradeInitial').classList.remove('hidden');
     document.getElementById('upgradeProgress').classList.add('hidden');
@@ -1439,6 +1439,105 @@ function openUpgradeModal() {
     document.getElementById('upgradeFailed').classList.add('hidden');
     document.getElementById('upgradeRestarting').classList.add('hidden');
     document.getElementById('upgradeModalClose').style.display = '';
+
+    // Check for updates and show preview
+    await checkForUpdates();
+}
+
+async function checkForUpdates() {
+    const previewContainer = document.getElementById('upgradePreview');
+    if (!previewContainer) return;
+
+    previewContainer.innerHTML = '<div style="color: var(--text-muted); padding: 10px;">Checking for updates...</div>';
+
+    try {
+        const response = await fetch('/api/system/upgrade/check');
+        const updates = await response.json();
+
+        if (response.ok) {
+            let html = '';
+
+            // UI Updates section
+            if (updates.ui_update_available && updates.ui_commits && updates.ui_commits.length > 0) {
+                html += `
+                    <div class="update-section">
+                        <h4 style="color: var(--accent-primary); margin-bottom: 8px;">&#128230; UI Updates Available</h4>
+                        <div class="update-list">
+                            ${updates.ui_commits.map(c => `
+                                <div class="update-item">
+                                    <span class="commit-hash">${c.hash}</span>
+                                    <span class="commit-msg">${c.message}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div class="update-section">
+                        <h4 style="color: var(--accent-success); margin-bottom: 8px;">&#9989; UI is up to date</h4>
+                    </div>
+                `;
+            }
+
+            // System Updates section
+            if (updates.system_updates_available) {
+                html += `
+                    <div class="update-section" style="margin-top: 15px;">
+                        <h4 style="color: var(--accent-primary); margin-bottom: 8px;">&#128421; System Packages (${updates.system_package_count || updates.system_packages.length})</h4>
+                        <div class="update-list">
+                            ${updates.system_packages.slice(0, 5).map(pkg => `
+                                <div class="update-item">
+                                    <span class="package-name">${pkg}</span>
+                                </div>
+                            `).join('')}
+                            ${updates.system_package_count > 5 ? `
+                                <div class="update-item" style="color: var(--text-muted);">
+                                    ... and ${updates.system_package_count - 5} more packages
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div class="update-section" style="margin-top: 15px;">
+                        <h4 style="color: var(--accent-success); margin-bottom: 8px;">&#9989; System packages up to date</h4>
+                    </div>
+                `;
+            }
+
+            // Current version info
+            html += `
+                <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid var(--border-color); font-size: 11px; color: var(--text-muted);">
+                    Current version: ${updates.current_version || 'Unknown'}
+                    ${updates.current_branch ? ` (branch: ${updates.current_branch})` : ''}
+                </div>
+            `;
+
+            previewContainer.innerHTML = html;
+
+            // Update button states based on what's available
+            const uiBtn = document.querySelector('[onclick="startUpgrade(\'ui\')"]');
+            const fullBtn = document.querySelector('[onclick="startUpgrade(\'full\')"]');
+
+            if (uiBtn) {
+                if (!updates.ui_update_available) {
+                    uiBtn.disabled = true;
+                    uiBtn.textContent = 'UI UP TO DATE';
+                    uiBtn.classList.add('btn-disabled');
+                } else {
+                    uiBtn.disabled = false;
+                    uiBtn.textContent = 'UI UPDATE';
+                    uiBtn.classList.remove('btn-disabled');
+                }
+            }
+        } else {
+            previewContainer.innerHTML = `<div style="color: var(--accent-danger);">Error checking updates: ${updates.error || 'Unknown error'}</div>`;
+        }
+    } catch (error) {
+        previewContainer.innerHTML = `<div style="color: var(--accent-danger);">Failed to check for updates: ${error.message}</div>`;
+    }
 }
 
 function closeUpgradeModal() {
@@ -1929,24 +2028,17 @@ async function startSpeedtest(targetIP) {
 }
 
 function startSpeedtestPolling() {
-    let lastResultCount = 0;
-    let testPhase = 'download'; // iperf3 does download first, then upload
-
     speedtestPollingInterval = setInterval(async () => {
         try {
             const response = await fetch('/api/iperf/status');
             const status = await response.json();
 
             if (status.running) {
-                // Update status text based on phase
+                // Use phase from server status (set by iperf parsing)
+                const testPhase = status.phase || 'download';
                 const resultCount = status.results ? status.results.length : 0;
 
-                // Detect phase change (roughly halfway = switch to upload)
-                if (resultCount > 5 && testPhase === 'download') {
-                    testPhase = 'upload';
-                }
-
-                // Calculate progress based on results (iperf3 typically sends ~10 interval results)
+                // Calculate progress based on results (iperf3 sends ~10 intervals per phase)
                 const progressPercent = Math.min((resultCount / 20) * 100, 95);
                 document.getElementById('speedtestProgressFill').style.width = `${progressPercent}%`;
                 document.getElementById('speedtestStatus').textContent =
@@ -1956,20 +2048,19 @@ function startSpeedtestPolling() {
                 if (status.results && status.results.length > 0) {
                     const latest = status.results[status.results.length - 1];
                     const speedMbps = (latest.bits_per_second / 1000000).toFixed(1);
+                    const resultPhase = latest.phase || testPhase;
 
-                    // Update the appropriate gauge based on test phase
-                    if (testPhase === 'download') {
+                    // Update the appropriate gauge based on result's phase
+                    if (resultPhase === 'download') {
                         updateSpeedGauge('download', speedMbps);
                     } else {
                         updateSpeedGauge('upload', speedMbps);
                     }
 
-                    // Also update the status with live speed
+                    // Update status with live speed
                     document.getElementById('speedtestStatus').textContent =
-                        `${testPhase === 'download' ? 'Download' : 'Upload'}: ${speedMbps} Mbps`;
+                        `${resultPhase === 'download' ? 'Download' : 'Upload'}: ${speedMbps} Mbps`;
                 }
-
-                lastResultCount = resultCount;
             } else {
                 clearInterval(speedtestPollingInterval);
                 speedtestPollingInterval = null;
