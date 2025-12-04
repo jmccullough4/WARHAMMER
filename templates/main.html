@@ -217,6 +217,23 @@
                     </div>
                 </div>
 
+                <!-- Plugins -->
+                <div class="panel-section" id="pluginsSection">
+                    <div class="section-header collapsible" onclick="toggleSection('pluginsSection')">
+                        <span class="section-icon">&#128230;</span>
+                        <span>PLUGINS</span>
+                        <span class="section-toggle">&#9660;</span>
+                    </div>
+                    <div class="section-content">
+                        <div class="plugin-list" id="pluginList">
+                            <!-- Plugins populated by JS -->
+                        </div>
+                        <button class="btn btn-primary btn-sm btn-block" onclick="showAddPluginModal()" style="margin-top: 10px;">
+                            + ADD PLUGIN
+                        </button>
+                    </div>
+                </div>
+
                 <!-- System Controls -->
                 <div class="panel-section" id="sbcSection">
                     <div class="section-header collapsible" onclick="toggleSection('sbcSection')">
@@ -748,6 +765,83 @@
                             <span></span><span></span><span></span>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Plugin Modal -->
+    <div id="addPluginModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span>&#128230; ADD PLUGIN</span>
+                <button class="modal-close" onclick="closeAddPluginModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Docker Image *</label>
+                    <input type="text" id="pluginImage" class="form-control" placeholder="e.g., ghcr.io/user/image:latest">
+                    <small class="form-help">Full Docker image name with registry and tag</small>
+                </div>
+                <div class="form-group">
+                    <label>Plugin Name</label>
+                    <input type="text" id="pluginName" class="form-control" placeholder="Leave empty to use image name">
+                </div>
+                <div class="form-group">
+                    <label>Network Mode</label>
+                    <select id="pluginNetwork" class="form-control">
+                        <option value="host">Host (recommended)</option>
+                        <option value="bridge">Bridge</option>
+                        <option value="none">None</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Port Mappings</label>
+                    <input type="text" id="pluginPorts" class="form-control" placeholder="e.g., 8080:80, 3000:3000">
+                    <small class="form-help">Comma-separated host:container port pairs (optional with host network)</small>
+                </div>
+                <div class="form-group">
+                    <label>Environment Variables</label>
+                    <textarea id="pluginEnv" class="form-control" rows="3" placeholder="KEY=value&#10;ANOTHER_KEY=value"></textarea>
+                    <small class="form-help">One variable per line</small>
+                </div>
+                <div class="form-group">
+                    <label>Volume Mounts</label>
+                    <textarea id="pluginVolumes" class="form-control" rows="2" placeholder="/host/path:/container/path&#10;/data:/app/data"></textarea>
+                    <small class="form-help">One mount per line (host:container)</small>
+                </div>
+                <div class="form-actions">
+                    <button class="btn btn-primary" onclick="addPlugin()">ADD PLUGIN</button>
+                    <button class="btn btn-secondary" onclick="closeAddPluginModal()">CANCEL</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Plugin Details Modal -->
+    <div id="pluginModal" class="modal hidden">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <span id="pluginModalTitle">&#128230; PLUGIN DETAILS</span>
+                <button class="modal-close" onclick="closePluginModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="pluginDetails">
+                    <!-- Plugin details populated by JS -->
+                </div>
+                <div class="plugin-logs-section">
+                    <div class="plugin-logs-header">
+                        <span>Container Logs</span>
+                        <button class="btn btn-xs btn-secondary" onclick="refreshPluginLogs()">Refresh</button>
+                    </div>
+                    <pre class="plugin-logs" id="pluginLogs">Loading logs...</pre>
+                </div>
+                <div class="form-actions" style="margin-top: 15px;">
+                    <button class="btn btn-success" id="pluginStartBtn" onclick="controlSelectedPlugin('start')">START</button>
+                    <button class="btn btn-warning" id="pluginStopBtn" onclick="controlSelectedPlugin('stop')">STOP</button>
+                    <button class="btn btn-secondary" id="pluginRestartBtn" onclick="controlSelectedPlugin('restart')">RESTART</button>
+                    <button class="btn btn-primary" id="pluginUpdateBtn" onclick="updateSelectedPlugin()">UPDATE</button>
+                    <button class="btn btn-danger" id="pluginRemoveBtn" onclick="removeSelectedPlugin()">REMOVE</button>
                 </div>
             </div>
         </div>

@@ -1943,6 +1943,284 @@ def control_service(service, action):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ==================== DOCKER PLUGINS ====================
+
+# Plugin configuration storage
+PLUGINS_CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'plugins.json')
+
+def load_plugins_config():
+    """Load plugins configuration from file"""
+    if os.path.exists(PLUGINS_CONFIG_FILE):
+        try:
+            with open(PLUGINS_CONFIG_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            pass
+    return {'plugins': []}
+
+def save_plugins_config(config):
+    """Save plugins configuration to file"""
+    with open(PLUGINS_CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
+
+@app.route('/api/plugins')
+@login_required
+def get_plugins():
+    """Get list of installed plugins with their status"""
+    config = load_plugins_config()
+    plugins = []
+
+    for plugin in config.get('plugins', []):
+        plugin_info = {
+            'id': plugin.get('id'),
+            'name': plugin.get('name'),
+            'image': plugin.get('image'),
+            'ports': plugin.get('ports', []),
+            'env': plugin.get('env', {}),
+            'status': 'unknown',
+            'running': False,
+            'container_id': None
+        }
+
+        # Check if container exists and is running
+        try:
+            result = subprocess.run(
+                ['docker', 'ps', '-a', '--filter', f"name={plugin['id']}", '--format', '{{.Status}}'],
+                capture_output=True, text=True, timeout=10
+            )
+            status = result.stdout.strip()
+            if status:
+                plugin_info['status'] = status
+                plugin_info['running'] = 'Up' in status
+
+            # Get container ID
+            result = subprocess.run(
+                ['docker', 'ps', '-a', '--filter', f"name={plugin['id']}", '--format', '{{.ID}}'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.stdout.strip():
+                plugin_info['container_id'] = result.stdout.strip()
+        except:
+            pass
+
+        plugins.append(plugin_info)
+
+    return jsonify(plugins)
+
+@app.route('/api/plugins', methods=['POST'])
+@login_required
+def add_plugin():
+    """Add a new plugin"""
+    data = request.get_json()
+
+    if not data.get('image'):
+        return jsonify({'error': 'Docker image is required'}), 400
+
+    # Generate plugin ID from name or image
+    name = data.get('name') or data['image'].split('/')[-1].split(':')[0]
+    plugin_id = f"wh-plugin-{name.lower().replace(' ', '-')}"
+
+    plugin = {
+        'id': plugin_id,
+        'name': name,
+        'image': data['image'],
+        'ports': data.get('ports', []),
+        'env': data.get('env', {}),
+        'volumes': data.get('volumes', []),
+        'network': data.get('network', 'host'),
+        'restart_policy': data.get('restart_policy', 'unless-stopped')
+    }
+
+    config = load_plugins_config()
+
+    # Check if plugin already exists
+    for existing in config['plugins']:
+        if existing['id'] == plugin_id:
+            return jsonify({'error': 'Plugin with this name already exists'}), 409
+
+    config['plugins'].append(plugin)
+    save_plugins_config(config)
+
+    # Pull the image
+    try:
+        subprocess.run(
+            ['docker', 'pull', data['image']],
+            capture_output=True, text=True, timeout=300
+        )
+    except Exception as e:
+        return jsonify({'error': f'Failed to pull image: {str(e)}'}), 500
+
+    return jsonify({'status': 'added', 'plugin': plugin})
+
+@app.route('/api/plugins/<plugin_id>', methods=['DELETE'])
+@login_required
+def remove_plugin(plugin_id):
+    """Remove a plugin"""
+    config = load_plugins_config()
+
+    # Find and remove plugin
+    plugin_found = False
+    for i, plugin in enumerate(config['plugins']):
+        if plugin['id'] == plugin_id:
+            config['plugins'].pop(i)
+            plugin_found = True
+            break
+
+    if not plugin_found:
+        return jsonify({'error': 'Plugin not found'}), 404
+
+    # Stop and remove container if exists
+    try:
+        subprocess.run(['docker', 'stop', plugin_id], capture_output=True, timeout=30)
+        subprocess.run(['docker', 'rm', plugin_id], capture_output=True, timeout=30)
+    except:
+        pass
+
+    save_plugins_config(config)
+    return jsonify({'status': 'removed'})
+
+@app.route('/api/plugins/<plugin_id>/start', methods=['POST'])
+@login_required
+def start_plugin(plugin_id):
+    """Start a plugin container"""
+    config = load_plugins_config()
+
+    # Find plugin
+    plugin = None
+    for p in config['plugins']:
+        if p['id'] == plugin_id:
+            plugin = p
+            break
+
+    if not plugin:
+        return jsonify({'error': 'Plugin not found'}), 404
+
+    try:
+        # Check if container exists
+        result = subprocess.run(
+            ['docker', 'ps', '-a', '--filter', f"name={plugin_id}", '--format', '{{.ID}}'],
+            capture_output=True, text=True, timeout=10
+        )
+
+        if result.stdout.strip():
+            # Container exists, just start it
+            subprocess.run(['docker', 'start', plugin_id], capture_output=True, timeout=30)
+        else:
+            # Create and start new container
+            cmd = ['docker', 'run', '-d', '--name', plugin_id]
+
+            # Add network mode
+            if plugin.get('network'):
+                cmd.extend(['--network', plugin['network']])
+
+            # Add restart policy
+            if plugin.get('restart_policy'):
+                cmd.extend(['--restart', plugin['restart_policy']])
+
+            # Add port mappings
+            for port in plugin.get('ports', []):
+                cmd.extend(['-p', port])
+
+            # Add environment variables
+            for key, value in plugin.get('env', {}).items():
+                cmd.extend(['-e', f'{key}={value}'])
+
+            # Add volume mounts
+            for volume in plugin.get('volumes', []):
+                cmd.extend(['-v', volume])
+
+            cmd.append(plugin['image'])
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+
+            if result.returncode != 0:
+                return jsonify({'error': result.stderr}), 500
+
+        return jsonify({'status': 'started'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/plugins/<plugin_id>/stop', methods=['POST'])
+@login_required
+def stop_plugin(plugin_id):
+    """Stop a plugin container"""
+    try:
+        result = subprocess.run(
+            ['docker', 'stop', plugin_id],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            return jsonify({'error': result.stderr}), 500
+        return jsonify({'status': 'stopped'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/plugins/<plugin_id>/restart', methods=['POST'])
+@login_required
+def restart_plugin(plugin_id):
+    """Restart a plugin container"""
+    try:
+        result = subprocess.run(
+            ['docker', 'restart', plugin_id],
+            capture_output=True, text=True, timeout=60
+        )
+        if result.returncode != 0:
+            return jsonify({'error': result.stderr}), 500
+        return jsonify({'status': 'restarted'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/plugins/<plugin_id>/logs')
+@login_required
+def get_plugin_logs(plugin_id):
+    """Get logs from a plugin container"""
+    lines = request.args.get('lines', '100')
+    try:
+        result = subprocess.run(
+            ['docker', 'logs', '--tail', lines, plugin_id],
+            capture_output=True, text=True, timeout=30
+        )
+        return jsonify({
+            'logs': result.stdout + result.stderr,
+            'plugin_id': plugin_id
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/plugins/<plugin_id>/update', methods=['POST'])
+@login_required
+def update_plugin(plugin_id):
+    """Update a plugin to latest image version"""
+    config = load_plugins_config()
+
+    # Find plugin
+    plugin = None
+    for p in config['plugins']:
+        if p['id'] == plugin_id:
+            plugin = p
+            break
+
+    if not plugin:
+        return jsonify({'error': 'Plugin not found'}), 404
+
+    try:
+        # Pull latest image
+        result = subprocess.run(
+            ['docker', 'pull', plugin['image']],
+            capture_output=True, text=True, timeout=300
+        )
+        if result.returncode != 0:
+            return jsonify({'error': f'Failed to pull image: {result.stderr}'}), 500
+
+        # Stop and remove old container
+        subprocess.run(['docker', 'stop', plugin_id], capture_output=True, timeout=30)
+        subprocess.run(['docker', 'rm', plugin_id], capture_output=True, timeout=30)
+
+        # Start will create new container with updated image
+        return start_plugin(plugin_id)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # ==================== INTERFACE CONFIGURATION ====================
 
 @app.route('/api/interface/<iface>/ip', methods=['POST'])
