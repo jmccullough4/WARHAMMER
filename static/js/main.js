@@ -46,6 +46,7 @@ function initApp(config) {
     fetchSystemInfo();
     fetchNetworkInterfaces();
     fetchServices();
+    fetchPlugins();
     fetchWarhammerStatus();
     fetchPeers();
     fetchRoutes();
@@ -55,6 +56,7 @@ function initApp(config) {
     refreshIntervals.systemInfo = setInterval(fetchSystemInfo, 5000);
     refreshIntervals.interfaces = setInterval(fetchNetworkInterfaces, 10000);
     refreshIntervals.services = setInterval(fetchServices, 30000);
+    refreshIntervals.plugins = setInterval(fetchPlugins, 30000);
     refreshIntervals.peers = setInterval(fetchPeers, 15000);
     refreshIntervals.warhammer = setInterval(fetchWarhammerStatus, 30000);
     refreshIntervals.routes = setInterval(fetchRoutes, 60000);
@@ -274,6 +276,275 @@ async function fetchServices() {
 
     } catch (error) {
         console.error('Error fetching services:', error);
+    }
+}
+
+// ==================== PLUGINS ====================
+
+let allPlugins = [];
+let selectedPlugin = null;
+
+async function fetchPlugins() {
+    try {
+        const response = await fetch('/api/plugins');
+        const plugins = await response.json();
+
+        if (plugins.error) {
+            throw new Error(plugins.error);
+        }
+
+        allPlugins = plugins;
+        renderPlugins(plugins);
+
+    } catch (error) {
+        console.error('Error fetching plugins:', error);
+    }
+}
+
+function renderPlugins(plugins) {
+    const container = document.getElementById('pluginList');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    if (plugins.length === 0) {
+        container.innerHTML = '<div class="no-plugins">No plugins installed</div>';
+        return;
+    }
+
+    plugins.forEach(plugin => {
+        const div = document.createElement('div');
+        div.className = `plugin-item ${plugin.running ? 'running' : 'stopped'}`;
+        div.onclick = () => showPluginDetails(plugin);
+        div.innerHTML = `
+            <div class="plugin-status-dot"></div>
+            <div class="plugin-info">
+                <span class="plugin-name">${plugin.name}</span>
+                <span class="plugin-status">${plugin.running ? 'Running' : 'Stopped'}</span>
+            </div>
+        `;
+        container.appendChild(div);
+    });
+}
+
+function showAddPluginModal() {
+    document.getElementById('pluginImage').value = '';
+    document.getElementById('pluginName').value = '';
+    document.getElementById('pluginNetwork').value = 'host';
+    document.getElementById('pluginPorts').value = '';
+    document.getElementById('pluginEnv').value = '';
+    document.getElementById('pluginVolumes').value = '';
+    document.getElementById('addPluginModal').classList.remove('hidden');
+}
+
+function closeAddPluginModal() {
+    document.getElementById('addPluginModal').classList.add('hidden');
+}
+
+async function addPlugin() {
+    const image = document.getElementById('pluginImage').value.trim();
+    const name = document.getElementById('pluginName').value.trim();
+    const network = document.getElementById('pluginNetwork').value;
+    const portsRaw = document.getElementById('pluginPorts').value.trim();
+    const envRaw = document.getElementById('pluginEnv').value.trim();
+    const volumesRaw = document.getElementById('pluginVolumes').value.trim();
+
+    if (!image) {
+        addLog('ERROR', 'Docker image is required');
+        return;
+    }
+
+    // Parse ports
+    const ports = portsRaw ? portsRaw.split(',').map(p => p.trim()).filter(p => p) : [];
+
+    // Parse environment variables
+    const env = {};
+    if (envRaw) {
+        envRaw.split('\n').forEach(line => {
+            const [key, ...valueParts] = line.split('=');
+            if (key && valueParts.length > 0) {
+                env[key.trim()] = valueParts.join('=').trim();
+            }
+        });
+    }
+
+    // Parse volumes
+    const volumes = volumesRaw ? volumesRaw.split('\n').map(v => v.trim()).filter(v => v) : [];
+
+    try {
+        addLog('INFO', `Adding plugin: ${image}...`);
+
+        const response = await fetch('/api/plugins', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                image,
+                name: name || undefined,
+                network,
+                ports,
+                env,
+                volumes
+            })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            addLog('SUCCESS', `Plugin added: ${data.plugin.name}`);
+            closeAddPluginModal();
+            fetchPlugins();
+        } else {
+            addLog('ERROR', `Failed to add plugin: ${data.error}`);
+        }
+    } catch (error) {
+        addLog('ERROR', `Failed to add plugin: ${error.message}`);
+    }
+}
+
+function showPluginDetails(plugin) {
+    selectedPlugin = plugin;
+    document.getElementById('pluginModalTitle').innerHTML = `&#128230; ${plugin.name}`;
+
+    const detailsHtml = `
+        <div class="plugin-detail-grid">
+            <div class="info-row">
+                <span class="info-label">Image:</span>
+                <span class="info-value">${plugin.image}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Container ID:</span>
+                <span class="info-value">${plugin.container_id || 'Not created'}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Status:</span>
+                <span class="info-value ${plugin.running ? 'online' : 'offline'}">${plugin.status}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Ports:</span>
+                <span class="info-value">${plugin.ports.length > 0 ? plugin.ports.join(', ') : 'None'}</span>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('pluginDetails').innerHTML = detailsHtml;
+
+    // Update button states
+    document.getElementById('pluginStartBtn').disabled = plugin.running;
+    document.getElementById('pluginStopBtn').disabled = !plugin.running;
+    document.getElementById('pluginRestartBtn').disabled = !plugin.container_id;
+
+    // Load logs
+    refreshPluginLogs();
+
+    document.getElementById('pluginModal').classList.remove('hidden');
+}
+
+function closePluginModal() {
+    document.getElementById('pluginModal').classList.add('hidden');
+    selectedPlugin = null;
+}
+
+async function refreshPluginLogs() {
+    if (!selectedPlugin) return;
+
+    try {
+        const response = await fetch(`/api/plugins/${selectedPlugin.id}/logs?lines=50`);
+        const data = await response.json();
+
+        const logsEl = document.getElementById('pluginLogs');
+        if (data.logs) {
+            logsEl.textContent = data.logs || 'No logs available';
+        } else if (data.error) {
+            logsEl.textContent = `Error: ${data.error}`;
+        }
+    } catch (error) {
+        document.getElementById('pluginLogs').textContent = `Error loading logs: ${error.message}`;
+    }
+}
+
+async function controlSelectedPlugin(action) {
+    if (!selectedPlugin) return;
+
+    try {
+        addLog('INFO', `${action.charAt(0).toUpperCase() + action.slice(1)}ing plugin ${selectedPlugin.name}...`);
+
+        const response = await fetch(`/api/plugins/${selectedPlugin.id}/${action}`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+            addLog('SUCCESS', `Plugin ${action}ed successfully`);
+            fetchPlugins();
+            // Refresh the modal with updated info
+            setTimeout(async () => {
+                const updatedPlugins = await (await fetch('/api/plugins')).json();
+                const updated = updatedPlugins.find(p => p.id === selectedPlugin.id);
+                if (updated) showPluginDetails(updated);
+            }, 1000);
+        } else {
+            addLog('ERROR', `Failed to ${action} plugin: ${data.error}`);
+        }
+    } catch (error) {
+        addLog('ERROR', `Failed to ${action} plugin: ${error.message}`);
+    }
+}
+
+async function updateSelectedPlugin() {
+    if (!selectedPlugin) return;
+
+    if (!confirm(`Update ${selectedPlugin.name} to the latest image version? This will restart the container.`)) {
+        return;
+    }
+
+    try {
+        addLog('INFO', `Updating plugin ${selectedPlugin.name}...`);
+
+        const response = await fetch(`/api/plugins/${selectedPlugin.id}/update`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+            addLog('SUCCESS', `Plugin updated successfully`);
+            fetchPlugins();
+            setTimeout(async () => {
+                const updatedPlugins = await (await fetch('/api/plugins')).json();
+                const updated = updatedPlugins.find(p => p.id === selectedPlugin.id);
+                if (updated) showPluginDetails(updated);
+            }, 2000);
+        } else {
+            addLog('ERROR', `Failed to update plugin: ${data.error}`);
+        }
+    } catch (error) {
+        addLog('ERROR', `Failed to update plugin: ${error.message}`);
+    }
+}
+
+async function removeSelectedPlugin() {
+    if (!selectedPlugin) return;
+
+    if (!confirm(`Remove plugin "${selectedPlugin.name}"? This will stop and delete the container.`)) {
+        return;
+    }
+
+    try {
+        addLog('INFO', `Removing plugin ${selectedPlugin.name}...`);
+
+        const response = await fetch(`/api/plugins/${selectedPlugin.id}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+
+        if (response.ok) {
+            addLog('SUCCESS', `Plugin removed successfully`);
+            closePluginModal();
+            fetchPlugins();
+        } else {
+            addLog('ERROR', `Failed to remove plugin: ${data.error}`);
+        }
+    } catch (error) {
+        addLog('ERROR', `Failed to remove plugin: ${error.message}`);
     }
 }
 
