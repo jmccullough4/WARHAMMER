@@ -2338,6 +2338,7 @@ def run_upgrade_task(upgrade_type='full'):
 
         if upgrade_type == 'full':
             # Full system upgrade: apt update/upgrade + UI
+            apt_success = True
 
             # Stage 1: Update package lists
             upgrade_status['stage'] = 'Updating package lists...'
@@ -2345,28 +2346,45 @@ def run_upgrade_task(upgrade_type='full'):
             upgrade_status['log'].append('[INFO] Running apt update...')
             socketio.emit('upgrade_progress', upgrade_status)
 
-            # Use -o APT::Sandbox::User=root to avoid privilege dropping issues
-            result = subprocess.run(
-                ['apt-get', 'update', '-o', 'APT::Sandbox::User=root'],
-                capture_output=True, text=True, timeout=300
-            )
-            if result.returncode != 0:
-                raise Exception(f"apt update failed: {result.stderr}")
-            upgrade_status['log'].append('[OK] Package lists updated')
+            # Try apt update - may fail in restricted environments
+            try:
+                result = subprocess.run(
+                    ['apt-get', 'update', '-o', 'APT::Sandbox::User=root'],
+                    capture_output=True, text=True, timeout=300
+                )
+                if result.returncode != 0:
+                    # Check if it's a permission error
+                    if 'Permission denied' in result.stderr or 'Operation not permitted' in result.stderr:
+                        upgrade_status['log'].append('[WARN] System package updates not available in this environment')
+                        upgrade_status['log'].append('[INFO] Use "apt update && apt upgrade" from terminal for system updates')
+                        apt_success = False
+                    else:
+                        raise Exception(f"apt update failed: {result.stderr}")
+                else:
+                    upgrade_status['log'].append('[OK] Package lists updated')
+            except subprocess.TimeoutExpired:
+                upgrade_status['log'].append('[WARN] apt update timed out')
+                apt_success = False
 
-            # Stage 2: Upgrade packages
-            upgrade_status['stage'] = 'Upgrading system packages...'
-            upgrade_status['progress'] = 30
-            upgrade_status['log'].append('[INFO] Running apt upgrade...')
-            socketio.emit('upgrade_progress', upgrade_status)
+            # Stage 2: Upgrade packages (only if apt update succeeded)
+            if apt_success:
+                upgrade_status['stage'] = 'Upgrading system packages...'
+                upgrade_status['progress'] = 30
+                upgrade_status['log'].append('[INFO] Running apt upgrade...')
+                socketio.emit('upgrade_progress', upgrade_status)
 
-            result = subprocess.run(
-                ['apt-get', 'upgrade', '-y', '-o', 'APT::Sandbox::User=root'],
-                capture_output=True, text=True, timeout=1800
-            )
-            if result.returncode != 0:
-                raise Exception(f"apt upgrade failed: {result.stderr}")
-            upgrade_status['log'].append('[OK] System packages upgraded')
+                try:
+                    result = subprocess.run(
+                        ['apt-get', 'upgrade', '-y', '-o', 'APT::Sandbox::User=root'],
+                        capture_output=True, text=True, timeout=1800
+                    )
+                    if result.returncode != 0:
+                        upgrade_status['log'].append(f'[WARN] apt upgrade failed: {result.stderr[:200]}')
+                    else:
+                        upgrade_status['log'].append('[OK] System packages upgraded')
+                except subprocess.TimeoutExpired:
+                    upgrade_status['log'].append('[WARN] apt upgrade timed out')
+
             upgrade_status['progress'] = 60
             socketio.emit('upgrade_progress', upgrade_status)
 
@@ -2389,19 +2407,22 @@ def run_upgrade_task(upgrade_type='full'):
             else:
                 upgrade_status['log'].append('[INFO] Not a git repository, skipping app update')
 
-            # Stage 4: Cleanup
-            upgrade_status['stage'] = 'Cleaning up...'
-            upgrade_status['progress'] = 85
-            upgrade_status['log'].append('[INFO] Running apt autoremove...')
-            socketio.emit('upgrade_progress', upgrade_status)
+            # Stage 4: Cleanup (only if apt was working)
+            if apt_success:
+                upgrade_status['stage'] = 'Cleaning up...'
+                upgrade_status['progress'] = 85
+                upgrade_status['log'].append('[INFO] Running apt autoremove...')
+                socketio.emit('upgrade_progress', upgrade_status)
 
-            subprocess.run(['apt-get', 'autoremove', '-y', '-o', 'APT::Sandbox::User=root'], capture_output=True, timeout=300)
-            upgrade_status['log'].append('[OK] Cleanup completed')
+                subprocess.run(['apt-get', 'autoremove', '-y', '-o', 'APT::Sandbox::User=root'], capture_output=True, timeout=300)
+                upgrade_status['log'].append('[OK] Cleanup completed')
 
-            # Check if reboot is required
-            upgrade_status['reboot_required'] = check_reboot_required()
-            if upgrade_status['reboot_required']:
-                upgrade_status['log'].append('[INFO] System reboot recommended (kernel update detected)')
+                # Check if reboot is required
+                upgrade_status['reboot_required'] = check_reboot_required()
+                if upgrade_status['reboot_required']:
+                    upgrade_status['log'].append('[INFO] System reboot recommended (kernel update detected)')
+            else:
+                upgrade_status['progress'] = 85
 
         else:
             # UI-only upgrade: just git pull
