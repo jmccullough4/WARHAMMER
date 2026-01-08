@@ -2350,28 +2350,37 @@ def run_upgrade_task(upgrade_type='full'):
             try:
                 # First try with systemd-run to bypass service restrictions
                 result = subprocess.run(
-                    ['systemd-run', '--scope', '--quiet', 'apt-get', 'update', '-o', 'APT::Sandbox::User=root'],
+                    ['systemd-run', '--scope', 'apt-get', 'update'],
                     capture_output=True, text=True, timeout=300
                 )
+                apt_output = result.stdout + result.stderr
+
                 if result.returncode != 0:
+                    upgrade_status['log'].append(f'[DEBUG] systemd-run failed (code {result.returncode}), trying direct apt...')
                     # Fallback to direct apt-get
                     result = subprocess.run(
-                        ['apt-get', 'update', '-o', 'APT::Sandbox::User=root'],
-                        capture_output=True, text=True, timeout=300
+                        ['apt-get', 'update'],
+                        capture_output=True, text=True, timeout=300,
+                        env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
                     )
+                    apt_output = result.stdout + result.stderr
 
                 if result.returncode != 0:
                     # Check if it's a permission error
-                    if 'Permission denied' in result.stderr or 'Operation not permitted' in result.stderr:
+                    if 'Permission denied' in apt_output or 'Operation not permitted' in apt_output:
                         upgrade_status['log'].append('[WARN] System package updates not available in this environment')
+                        upgrade_status['log'].append(f'[DEBUG] Error: {apt_output[:300]}')
                         upgrade_status['log'].append('[INFO] Use "apt update && apt upgrade" from terminal for system updates')
                         apt_success = False
                     else:
-                        raise Exception(f"apt update failed: {result.stderr}")
+                        raise Exception(f"apt update failed: {apt_output[:500]}")
                 else:
                     upgrade_status['log'].append('[OK] Package lists updated')
             except subprocess.TimeoutExpired:
                 upgrade_status['log'].append('[WARN] apt update timed out')
+                apt_success = False
+            except FileNotFoundError as e:
+                upgrade_status['log'].append(f'[WARN] Command not found: {e}')
                 apt_success = False
 
             # Stage 2: Upgrade packages (only if apt update succeeded)
