@@ -2345,8 +2345,9 @@ def run_upgrade_task(upgrade_type='full'):
             upgrade_status['log'].append('[INFO] Running apt update...')
             socketio.emit('upgrade_progress', upgrade_status)
 
+            # Use -o APT::Sandbox::User=root to avoid privilege dropping issues
             result = subprocess.run(
-                ['apt', 'update', '-y'],
+                ['apt-get', 'update', '-o', 'APT::Sandbox::User=root'],
                 capture_output=True, text=True, timeout=300
             )
             if result.returncode != 0:
@@ -2360,7 +2361,7 @@ def run_upgrade_task(upgrade_type='full'):
             socketio.emit('upgrade_progress', upgrade_status)
 
             result = subprocess.run(
-                ['apt', 'upgrade', '-y'],
+                ['apt-get', 'upgrade', '-y', '-o', 'APT::Sandbox::User=root'],
                 capture_output=True, text=True, timeout=1800
             )
             if result.returncode != 0:
@@ -2394,7 +2395,7 @@ def run_upgrade_task(upgrade_type='full'):
             upgrade_status['log'].append('[INFO] Running apt autoremove...')
             socketio.emit('upgrade_progress', upgrade_status)
 
-            subprocess.run(['apt', 'autoremove', '-y'], capture_output=True, timeout=300)
+            subprocess.run(['apt-get', 'autoremove', '-y', '-o', 'APT::Sandbox::User=root'], capture_output=True, timeout=300)
             upgrade_status['log'].append('[OK] Cleanup completed')
 
             # Check if reboot is required
@@ -2537,11 +2538,11 @@ def check_for_updates():
         # Check for system updates (apt)
         try:
             # Update package lists quietly
-            subprocess.run(['apt', 'update', '-qq'], capture_output=True, timeout=60)
+            subprocess.run(['apt-get', 'update', '-qq', '-o', 'APT::Sandbox::User=root'], capture_output=True, timeout=60)
 
             # Check upgradable packages
             result = subprocess.run(
-                ['apt', 'list', '--upgradable'],
+                ['apt', 'list', '--upgradable', '-o', 'APT::Sandbox::User=root'],
                 capture_output=True, text=True, timeout=30
             )
 
