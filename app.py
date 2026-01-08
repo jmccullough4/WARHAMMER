@@ -1860,10 +1860,10 @@ def sbc_power_control():
         action = request.json.get('action')
 
         if action == 'reboot':
-            subprocess.Popen(['sudo', 'reboot'])
+            subprocess.Popen(['reboot'])
             return jsonify({'status': 'rebooting'})
         elif action == 'shutdown':
-            subprocess.Popen(['sudo', 'shutdown', '-h', 'now'])
+            subprocess.Popen(['shutdown', '-h', 'now'])
             return jsonify({'status': 'shutting down'})
         else:
             return jsonify({'error': 'Invalid action'}), 400
@@ -1931,7 +1931,7 @@ def control_service(service, action):
 
     try:
         result = subprocess.run(
-            ['sudo', 'systemctl', action, service],
+            ['systemctl', action, service],
             capture_output=True, text=True, timeout=30
         )
         return jsonify({
@@ -2346,7 +2346,7 @@ def run_upgrade_task(upgrade_type='full'):
             socketio.emit('upgrade_progress', upgrade_status)
 
             result = subprocess.run(
-                ['sudo', 'apt', 'update', '-y'],
+                ['apt', 'update', '-y'],
                 capture_output=True, text=True, timeout=300
             )
             if result.returncode != 0:
@@ -2360,7 +2360,7 @@ def run_upgrade_task(upgrade_type='full'):
             socketio.emit('upgrade_progress', upgrade_status)
 
             result = subprocess.run(
-                ['sudo', 'apt', 'upgrade', '-y'],
+                ['apt', 'upgrade', '-y'],
                 capture_output=True, text=True, timeout=1800
             )
             if result.returncode != 0:
@@ -2394,7 +2394,7 @@ def run_upgrade_task(upgrade_type='full'):
             upgrade_status['log'].append('[INFO] Running apt autoremove...')
             socketio.emit('upgrade_progress', upgrade_status)
 
-            subprocess.run(['sudo', 'apt', 'autoremove', '-y'], capture_output=True, timeout=300)
+            subprocess.run(['apt', 'autoremove', '-y'], capture_output=True, timeout=300)
             upgrade_status['log'].append('[OK] Cleanup completed')
 
             # Check if reboot is required
@@ -2619,7 +2619,7 @@ def restart_app():
         )
         if result.returncode == 0:
             # Running as systemd service
-            subprocess.Popen(['sudo', 'systemctl', 'restart', service_name])
+            subprocess.Popen(['systemctl', 'restart', service_name])
             return jsonify({'status': 'restarting', 'method': 'systemd'})
         else:
             # Just exit, let the parent process restart us
