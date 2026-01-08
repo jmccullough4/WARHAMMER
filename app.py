@@ -2346,34 +2346,33 @@ def run_upgrade_task(upgrade_type='full'):
             upgrade_status['log'].append('[INFO] Running apt update...')
             socketio.emit('upgrade_progress', upgrade_status)
 
-            # Try apt update - use systemd-run to escape service restrictions
+            # Try apt update
             try:
-                # First try with systemd-run to bypass service restrictions
                 result = subprocess.run(
-                    ['systemd-run', '--scope', 'apt-get', 'update'],
-                    capture_output=True, text=True, timeout=300
+                    ['apt-get', 'update'],
+                    capture_output=True, text=True, timeout=300,
+                    env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
                 )
                 apt_output = result.stdout + result.stderr
 
-                if result.returncode != 0:
-                    upgrade_status['log'].append(f'[DEBUG] systemd-run failed (code {result.returncode}), trying direct apt...')
-                    # Fallback to direct apt-get
-                    result = subprocess.run(
-                        ['apt-get', 'update'],
-                        capture_output=True, text=True, timeout=300,
-                        env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
-                    )
-                    apt_output = result.stdout + result.stderr
-
-                if result.returncode != 0:
-                    # Check if it's a permission error
-                    if 'Permission denied' in apt_output or 'Operation not permitted' in apt_output:
-                        upgrade_status['log'].append('[WARN] System package updates not available in this environment')
-                        upgrade_status['log'].append(f'[DEBUG] Error: {apt_output[:300]}')
-                        upgrade_status['log'].append('[INFO] Use "apt update && apt upgrade" from terminal for system updates')
-                        apt_success = False
+                # Check for permission errors (real blockers)
+                if 'Permission denied' in apt_output or 'Operation not permitted' in apt_output:
+                    upgrade_status['log'].append('[WARN] System package updates not available in this environment')
+                    upgrade_status['log'].append('[INFO] Use "apt update && apt upgrade" from terminal for system updates')
+                    apt_success = False
+                elif result.returncode != 0:
+                    # apt update returns non-zero if ANY repo has issues, but we can still proceed
+                    # Check if we got at least some successful updates (Hit or Get lines)
+                    if 'Hit:' in apt_output or 'Get:' in apt_output:
+                        upgrade_status['log'].append('[WARN] Some repositories had errors:')
+                        # Show error lines
+                        for line in apt_output.split('\n'):
+                            if line.startswith('Err:') or (line.startswith('E:') and 'Release' in line):
+                                upgrade_status['log'].append(f'  {line[:80]}')
+                        upgrade_status['log'].append('[OK] Package lists partially updated - continuing')
                     else:
-                        raise Exception(f"apt update failed: {apt_output[:500]}")
+                        upgrade_status['log'].append(f'[ERROR] apt update failed: {apt_output[:300]}')
+                        apt_success = False
                 else:
                     upgrade_status['log'].append('[OK] Package lists updated')
             except subprocess.TimeoutExpired:
@@ -2392,13 +2391,20 @@ def run_upgrade_task(upgrade_type='full'):
 
                 try:
                     result = subprocess.run(
-                        ['systemd-run', '--scope', '--quiet', 'apt-get', 'upgrade', '-y', '-o', 'APT::Sandbox::User=root'],
-                        capture_output=True, text=True, timeout=1800
+                        ['apt-get', 'upgrade', '-y'],
+                        capture_output=True, text=True, timeout=1800,
+                        env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
                     )
+                    apt_output = result.stdout + result.stderr
                     if result.returncode != 0:
-                        upgrade_status['log'].append(f'[WARN] apt upgrade failed: {result.stderr[:200]}')
+                        upgrade_status['log'].append(f'[WARN] apt upgrade had issues: {apt_output[-200:]}')
                     else:
-                        upgrade_status['log'].append('[OK] System packages upgraded')
+                        # Count upgraded packages
+                        upgraded = apt_output.count('Unpacking') + apt_output.count('Setting up')
+                        if upgraded > 0:
+                            upgrade_status['log'].append(f'[OK] System packages upgraded ({upgraded // 2} packages)')
+                        else:
+                            upgrade_status['log'].append('[OK] System packages are up to date')
                 except subprocess.TimeoutExpired:
                     upgrade_status['log'].append('[WARN] apt upgrade timed out')
 
@@ -2431,7 +2437,7 @@ def run_upgrade_task(upgrade_type='full'):
                 upgrade_status['log'].append('[INFO] Running apt autoremove...')
                 socketio.emit('upgrade_progress', upgrade_status)
 
-                subprocess.run(['systemd-run', '--scope', '--quiet', 'apt-get', 'autoremove', '-y', '-o', 'APT::Sandbox::User=root'], capture_output=True, timeout=300)
+                subprocess.run(['apt-get', 'autoremove', '-y'], capture_output=True, timeout=300, env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'})
                 upgrade_status['log'].append('[OK] Cleanup completed')
 
                 # Check if reboot is required
@@ -2575,8 +2581,8 @@ def check_for_updates():
 
         # Check for system updates (apt)
         try:
-            # Update package lists quietly using systemd-run to escape restrictions
-            subprocess.run(['systemd-run', '--scope', '--quiet', 'apt-get', 'update', '-qq', '-o', 'APT::Sandbox::User=root'], capture_output=True, timeout=60)
+            # Update package lists quietly
+            subprocess.run(['apt-get', 'update', '-qq'], capture_output=True, timeout=60, env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'})
 
             # Check upgradable packages
             result = subprocess.run(
