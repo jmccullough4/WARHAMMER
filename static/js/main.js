@@ -710,17 +710,27 @@ function renderRoutes(routes) {
 
     document.getElementById('routeCounter').textContent = routes.length;
 
-    routes.forEach(route => {
+    // Sort routes by name (network_id or description)
+    const sortedRoutes = [...routes].sort((a, b) => {
+        const nameA = (a.network_id || a.description || a.network || '').toLowerCase();
+        const nameB = (b.network_id || b.description || b.network || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+    });
+
+    sortedRoutes.forEach(route => {
         const div = document.createElement('div');
         div.className = 'route-item';
 
         const isPersistent = route.persistent;
         const canModify = !isPersistent;
 
+        const routeName = route.network_id || route.description || route.network;
+        const routeNetwork = route.network || route.networkRange || '';
+
         div.innerHTML = `
             <div class="route-info">
-                <div class="route-network">${route.network || route.networkRange || route.network_id}</div>
-                <div class="route-via">${route.description || 'No description'}${isPersistent ? ' (Persistent)' : ''}</div>
+                <div class="route-network">${routeName}${routeNetwork && routeName !== routeNetwork ? ` <span style="color: var(--text-muted); font-size: 11px;">(${routeNetwork})</span>` : ''}</div>
+                <div class="route-via">${route.description && route.description !== routeName ? route.description : ''}${isPersistent ? ' <span style="color: var(--accent-warning);">(Persistent)</span>' : ''}</div>
             </div>
             <div class="route-actions">
                 ${canModify ? `
@@ -1166,6 +1176,28 @@ function openAddRouteModal() {
         select.appendChild(option);
     });
 
+    // Populate groups dropdown
+    const groupSelect = document.getElementById('routeGroups');
+    groupSelect.innerHTML = '';
+    allGroups.forEach(group => {
+        const option = document.createElement('option');
+        option.value = group.id;
+        option.textContent = group.name;
+        // Pre-select "All" group if it exists
+        if (group.name === 'All') {
+            option.selected = true;
+        }
+        groupSelect.appendChild(option);
+    });
+
+    // Clear form fields
+    document.getElementById('routeNetworkId').value = '';
+    document.getElementById('routeNetwork').value = '';
+    document.getElementById('routeDescription').value = '';
+    document.getElementById('routeMetric').value = '9999';
+    document.getElementById('routeMasquerade').checked = true;
+    document.getElementById('routeEnabled').checked = true;
+
     document.getElementById('addRouteModal').classList.remove('hidden');
 }
 
@@ -1174,6 +1206,7 @@ function closeAddRouteModal() {
 }
 
 async function submitAddRoute() {
+    const networkId = document.getElementById('routeNetworkId').value.trim();
     const network = document.getElementById('routeNetwork').value.trim();
     const description = document.getElementById('routeDescription').value.trim();
     const peerId = document.getElementById('routePeer').value;
@@ -1181,8 +1214,27 @@ async function submitAddRoute() {
     const masquerade = document.getElementById('routeMasquerade').checked;
     const enabled = document.getElementById('routeEnabled').checked;
 
+    // Get selected groups
+    const groupSelect = document.getElementById('routeGroups');
+    const groups = Array.from(groupSelect.selectedOptions).map(opt => opt.value);
+
+    if (!networkId) {
+        addLog('ERROR', 'Network ID is required');
+        return;
+    }
+
     if (!network) {
         addLog('ERROR', 'Network CIDR is required');
+        return;
+    }
+
+    if (!peerId) {
+        addLog('ERROR', 'Peer is required');
+        return;
+    }
+
+    if (groups.length === 0) {
+        addLog('ERROR', 'At least one group must be selected');
         return;
     }
 
@@ -1191,12 +1243,14 @@ async function submitAddRoute() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                network_id: networkId,
                 network,
                 description,
                 peer: peerId,
                 metric,
                 masquerade,
-                enabled
+                enabled,
+                groups
             })
         });
 
@@ -1207,7 +1261,7 @@ async function submitAddRoute() {
             closeAddRouteModal();
             fetchRoutes();
         } else {
-            addLog('ERROR', data.error || 'Failed to add route');
+            addLog('ERROR', data.error || data.details || 'Failed to add route');
         }
     } catch (error) {
         addLog('ERROR', `Add route failed: ${error.message}`);

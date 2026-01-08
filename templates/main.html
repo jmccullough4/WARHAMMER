@@ -619,6 +619,11 @@
             </div>
             <div class="modal-body">
                 <div class="form-row">
+                    <label>Network ID:</label>
+                    <input type="text" id="routeNetworkId" placeholder="office-network" class="input">
+                    <small style="color: var(--text-muted); font-size: 11px;">Unique identifier (lowercase, no spaces)</small>
+                </div>
+                <div class="form-row">
                     <label>Network CIDR:</label>
                     <input type="text" id="routeNetwork" placeholder="10.0.0.0/24" class="input">
                 </div>
@@ -631,6 +636,13 @@
                     <select id="routePeer" class="input">
                         <option value="">-- Select Peer --</option>
                     </select>
+                </div>
+                <div class="form-row">
+                    <label>Groups:</label>
+                    <select id="routeGroups" class="input" multiple size="4">
+                        <!-- Populated by JS -->
+                    </select>
+                    <small style="color: var(--text-muted); font-size: 11px;">Ctrl+click to select multiple</small>
                 </div>
                 <div class="form-row">
                     <label>Metric:</label>
