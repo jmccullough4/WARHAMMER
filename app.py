@@ -2336,150 +2336,41 @@ def run_upgrade_task(upgrade_type='full'):
     try:
         app_dir = os.path.dirname(os.path.abspath(__file__))
 
-        if upgrade_type == 'full':
-            # Full system upgrade: apt update/upgrade + UI
-            apt_success = True
+        # UI-only upgrade: just git pull
+        upgrade_status['stage'] = 'Updating WARHAMMER...'
+        upgrade_status['progress'] = 20
+        upgrade_status['log'].append('[INFO] Fetching latest WARHAMMER updates...')
+        socketio.emit('upgrade_progress', upgrade_status)
 
-            # Stage 1: Update package lists
-            upgrade_status['stage'] = 'Updating package lists...'
-            upgrade_status['progress'] = 10
-            upgrade_status['log'].append('[INFO] Running apt update...')
+        if os.path.exists(os.path.join(app_dir, '.git')):
+            # Fetch first
+            result = subprocess.run(
+                ['git', 'fetch', 'origin'],
+                cwd=app_dir,
+                capture_output=True, text=True, timeout=120
+            )
+            upgrade_status['progress'] = 40
             socketio.emit('upgrade_progress', upgrade_status)
 
-            # Try apt update - use systemd-run to escape service restrictions
-            try:
-                # First try with systemd-run to bypass service restrictions
-                result = subprocess.run(
-                    ['systemd-run', '--scope', 'apt-get', 'update'],
-                    capture_output=True, text=True, timeout=300
-                )
-                apt_output = result.stdout + result.stderr
-
-                if result.returncode != 0:
-                    upgrade_status['log'].append(f'[DEBUG] systemd-run failed (code {result.returncode}), trying direct apt...')
-                    # Fallback to direct apt-get
-                    result = subprocess.run(
-                        ['apt-get', 'update'],
-                        capture_output=True, text=True, timeout=300,
-                        env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
-                    )
-                    apt_output = result.stdout + result.stderr
-
-                if result.returncode != 0:
-                    # Check if it's a permission error
-                    if 'Permission denied' in apt_output or 'Operation not permitted' in apt_output:
-                        upgrade_status['log'].append('[WARN] System package updates not available in this environment')
-                        upgrade_status['log'].append(f'[DEBUG] Error: {apt_output[:300]}')
-                        upgrade_status['log'].append('[INFO] Use "apt update && apt upgrade" from terminal for system updates')
-                        apt_success = False
-                    else:
-                        raise Exception(f"apt update failed: {apt_output[:500]}")
+            # Pull changes
+            result = subprocess.run(
+                ['git', 'pull', '--ff-only'],
+                cwd=app_dir,
+                capture_output=True, text=True, timeout=120
+            )
+            if result.returncode == 0:
+                output = result.stdout.strip()
+                if 'Already up to date' in output:
+                    upgrade_status['log'].append('[OK] WARHAMMER is already up to date')
                 else:
-                    upgrade_status['log'].append('[OK] Package lists updated')
-            except subprocess.TimeoutExpired:
-                upgrade_status['log'].append('[WARN] apt update timed out')
-                apt_success = False
-            except FileNotFoundError as e:
-                upgrade_status['log'].append(f'[WARN] Command not found: {e}')
-                apt_success = False
-
-            # Stage 2: Upgrade packages (only if apt update succeeded)
-            if apt_success:
-                upgrade_status['stage'] = 'Upgrading system packages...'
-                upgrade_status['progress'] = 30
-                upgrade_status['log'].append('[INFO] Running apt upgrade...')
-                socketio.emit('upgrade_progress', upgrade_status)
-
-                try:
-                    result = subprocess.run(
-                        ['systemd-run', '--scope', '--quiet', 'apt-get', 'upgrade', '-y', '-o', 'APT::Sandbox::User=root'],
-                        capture_output=True, text=True, timeout=1800
-                    )
-                    if result.returncode != 0:
-                        upgrade_status['log'].append(f'[WARN] apt upgrade failed: {result.stderr[:200]}')
-                    else:
-                        upgrade_status['log'].append('[OK] System packages upgraded')
-                except subprocess.TimeoutExpired:
-                    upgrade_status['log'].append('[WARN] apt upgrade timed out')
-
-            upgrade_status['progress'] = 60
-            socketio.emit('upgrade_progress', upgrade_status)
-
-            # Stage 3: Update WARHAMMER application (git pull)
-            upgrade_status['stage'] = 'Updating WARHAMMER application...'
-            upgrade_status['progress'] = 70
-            upgrade_status['log'].append('[INFO] Checking for WARHAMMER updates...')
-            socketio.emit('upgrade_progress', upgrade_status)
-
-            if os.path.exists(os.path.join(app_dir, '.git')):
-                result = subprocess.run(
-                    ['git', 'pull', '--ff-only'],
-                    cwd=app_dir,
-                    capture_output=True, text=True, timeout=120
-                )
-                if result.returncode == 0:
-                    upgrade_status['log'].append(f'[OK] WARHAMMER updated: {result.stdout.strip()}')
-                else:
-                    upgrade_status['log'].append(f'[WARN] Git pull skipped: {result.stderr.strip()}')
+                    upgrade_status['log'].append(f'[OK] WARHAMMER updated: {output}')
             else:
-                upgrade_status['log'].append('[INFO] Not a git repository, skipping app update')
+                upgrade_status['log'].append(f'[WARN] Git pull issue: {result.stderr.strip()}')
 
-            # Stage 4: Cleanup (only if apt was working)
-            if apt_success:
-                upgrade_status['stage'] = 'Cleaning up...'
-                upgrade_status['progress'] = 85
-                upgrade_status['log'].append('[INFO] Running apt autoremove...')
-                socketio.emit('upgrade_progress', upgrade_status)
-
-                subprocess.run(['systemd-run', '--scope', '--quiet', 'apt-get', 'autoremove', '-y', '-o', 'APT::Sandbox::User=root'], capture_output=True, timeout=300)
-                upgrade_status['log'].append('[OK] Cleanup completed')
-
-                # Check if reboot is required
-                upgrade_status['reboot_required'] = check_reboot_required()
-                if upgrade_status['reboot_required']:
-                    upgrade_status['log'].append('[INFO] System reboot recommended (kernel update detected)')
-            else:
-                upgrade_status['progress'] = 85
-
+            upgrade_status['progress'] = 80
+            socketio.emit('upgrade_progress', upgrade_status)
         else:
-            # UI-only upgrade: just git pull
-            upgrade_status['stage'] = 'Updating WARHAMMER UI...'
-            upgrade_status['progress'] = 20
-            upgrade_status['log'].append('[INFO] Fetching latest WARHAMMER updates...')
-            socketio.emit('upgrade_progress', upgrade_status)
-
-            if os.path.exists(os.path.join(app_dir, '.git')):
-                # Fetch first
-                result = subprocess.run(
-                    ['git', 'fetch', 'origin'],
-                    cwd=app_dir,
-                    capture_output=True, text=True, timeout=120
-                )
-                upgrade_status['progress'] = 40
-                socketio.emit('upgrade_progress', upgrade_status)
-
-                # Pull changes
-                result = subprocess.run(
-                    ['git', 'pull', '--ff-only'],
-                    cwd=app_dir,
-                    capture_output=True, text=True, timeout=120
-                )
-                if result.returncode == 0:
-                    output = result.stdout.strip()
-                    if 'Already up to date' in output:
-                        upgrade_status['log'].append('[OK] WARHAMMER is already up to date')
-                    else:
-                        upgrade_status['log'].append(f'[OK] WARHAMMER updated: {output}')
-                else:
-                    upgrade_status['log'].append(f'[WARN] Git pull issue: {result.stderr.strip()}')
-
-                upgrade_status['progress'] = 80
-                socketio.emit('upgrade_progress', upgrade_status)
-            else:
-                upgrade_status['log'].append('[WARN] Not a git repository, no updates available')
-
-            # UI-only never requires reboot
-            upgrade_status['reboot_required'] = False
+            upgrade_status['log'].append('[WARN] Not a git repository, no updates available')
 
         # Done - notify client before restart
         upgrade_status['stage'] = 'Upgrade completed! Restarting service...'
@@ -2572,26 +2463,6 @@ def check_for_updates():
                         'body': commit_body,
                         'full_message': commit_subject + ('\n\n' + commit_body if commit_body else '')
                     }
-
-        # Check for system updates (apt)
-        try:
-            # Update package lists quietly using systemd-run to escape restrictions
-            subprocess.run(['systemd-run', '--scope', '--quiet', 'apt-get', 'update', '-qq', '-o', 'APT::Sandbox::User=root'], capture_output=True, timeout=60)
-
-            # Check upgradable packages
-            result = subprocess.run(
-                ['apt', 'list', '--upgradable'],
-                capture_output=True, text=True, timeout=30
-            )
-
-            if result.returncode == 0:
-                lines = [l for l in result.stdout.strip().split('\n') if '/' in l]
-                if lines:
-                    updates['system_updates_available'] = True
-                    updates['system_packages'] = [l.split('/')[0] for l in lines[:10]]  # Limit to 10
-                    updates['system_package_count'] = len(lines)
-        except:
-            pass
 
         return jsonify(updates)
 
