@@ -2071,8 +2071,6 @@ async function checkForUpdates() {
     const previewContainer = document.getElementById('upgradePreview');
     const upgradeActions = document.getElementById('upgradeActions');
     const noUpdatesMessage = document.getElementById('noUpdatesMessage');
-    const uiUpgradeOption = document.getElementById('uiUpgradeOption');
-    const fullUpgradeOption = document.getElementById('fullUpgradeOption');
 
     if (!previewContainer) return;
 
@@ -2094,10 +2092,8 @@ async function checkForUpdates() {
 
         if (response.ok) {
             const hasUIUpdates = updates.ui_update_available && updates.latest_commit;
-            const hasSystemUpdates = updates.system_updates_available;
-            const hasAnyUpdates = hasUIUpdates || hasSystemUpdates;
 
-            if (!hasAnyUpdates) {
+            if (!hasUIUpdates) {
                 // No updates available
                 previewContainer.classList.add('hidden');
                 noUpdatesMessage?.classList.remove('hidden');
@@ -2108,51 +2104,27 @@ async function checkForUpdates() {
             let html = '';
 
             // UI Updates section - show only the most recent commit with full message
-            if (hasUIUpdates) {
-                const commit = updates.latest_commit;
-                const commitsBehind = updates.commits_behind || 1;
-                html += `
-                    <div class="update-section">
-                        <h4 style="color: var(--accent-primary); margin-bottom: 10px;">
-                            &#128230; WARHAMMER Update Available
-                            ${commitsBehind > 1 ? `<span style="font-size: 11px; font-weight: normal; color: var(--text-muted);"> (${commitsBehind} commits behind)</span>` : ''}
-                        </h4>
-                        <div class="latest-commit">
-                            <div class="commit-header">
-                                <span class="commit-hash">${commit.hash}</span>
-                                <span class="commit-subject">${commit.subject}</span>
+            const commit = updates.latest_commit;
+            const commitsBehind = updates.commits_behind || 1;
+            html += `
+                <div class="update-section">
+                    <h4 style="color: var(--accent-primary); margin-bottom: 10px;">
+                        &#128230; WARHAMMER Update Available
+                        ${commitsBehind > 1 ? `<span style="font-size: 11px; font-weight: normal; color: var(--text-muted);"> (${commitsBehind} commits behind)</span>` : ''}
+                    </h4>
+                    <div class="latest-commit">
+                        <div class="commit-header">
+                            <span class="commit-hash">${commit.hash}</span>
+                            <span class="commit-subject">${commit.subject}</span>
+                        </div>
+                        ${commit.body ? `
+                            <div class="commit-body">
+                                <pre>${commit.body}</pre>
                             </div>
-                            ${commit.body ? `
-                                <div class="commit-body">
-                                    <pre>${commit.body}</pre>
-                                </div>
-                            ` : ''}
-                        </div>
+                        ` : ''}
                     </div>
-                `;
-            }
-
-            // System Updates section
-            if (hasSystemUpdates) {
-                const pkgCount = updates.system_package_count || updates.system_packages.length;
-                html += `
-                    <div class="update-section" ${hasUIUpdates ? 'style="margin-top: 15px;"' : ''}>
-                        <h4 style="color: var(--accent-primary); margin-bottom: 8px;">&#128421; System Packages (${pkgCount} available)</h4>
-                        <div class="update-list">
-                            ${updates.system_packages.slice(0, 5).map(pkg => `
-                                <div class="update-item">
-                                    <span class="package-name">${pkg}</span>
-                                </div>
-                            `).join('')}
-                            ${pkgCount > 5 ? `
-                                <div class="update-item" style="color: var(--text-muted);">
-                                    ... and ${pkgCount - 5} more packages
-                                </div>
-                            ` : ''}
-                        </div>
-                    </div>
-                `;
-            }
+                </div>
+            `;
 
             // Check for outdated peers and add section if any
             const outdatedPeers = await checkOutdatedPeers();
@@ -2181,31 +2153,14 @@ async function checkForUpdates() {
                 </div>
             `;
 
+            // Add update button
+            html += `
+                <button class="btn btn-primary" style="width: 100%; margin-top: 15px;" onclick="startUpgrade('ui')">
+                    UPDATE WARHAMMER
+                </button>
+            `;
+
             previewContainer.innerHTML = html;
-
-            // Show upgrade actions
-            upgradeActions?.classList.remove('hidden');
-
-            // Enable/disable options based on what's available
-            if (uiUpgradeOption) {
-                if (!hasUIUpdates) {
-                    uiUpgradeOption.classList.add('disabled');
-                    uiUpgradeOption.onclick = null;
-                } else {
-                    uiUpgradeOption.classList.remove('disabled');
-                    uiUpgradeOption.onclick = () => startUpgrade('ui');
-                }
-            }
-
-            if (fullUpgradeOption) {
-                if (!hasAnyUpdates) {
-                    fullUpgradeOption.classList.add('disabled');
-                    fullUpgradeOption.onclick = null;
-                } else {
-                    fullUpgradeOption.classList.remove('disabled');
-                    fullUpgradeOption.onclick = () => startUpgrade('full');
-                }
-            }
         } else {
             previewContainer.innerHTML = `<div style="color: var(--accent-danger); padding: 15px;">Error checking updates: ${updates.error || 'Unknown error'}</div>`;
         }
