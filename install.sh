@@ -421,15 +421,15 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=warhammer
 
-# Security - relaxed for network operations
+# Security - relaxed for network and system operations
 NoNewPrivileges=false
 ProtectSystem=false
 ProtectHome=read-only
-PrivateTmp=true
+PrivateTmp=false
 
-# Allow network operations
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_ADMIN
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE
+# Allow network and system operations (including apt)
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
 
 [Install]
 WantedBy=multi-user.target
